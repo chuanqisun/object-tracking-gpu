@@ -5,19 +5,25 @@ import numpy as np
 import onnxruntime as ort
 from supervision import ByteTrack, Detections
 
+# ==============================================================================
+# Model Configuration
+# ==============================================================================
+NUM_CLASSES = 2  # Set to 80 for standard COCO or your custom class count
+NUM_MASK_COEFFS = 32  # Standard YOLO prototype mask coefficients (default 32)
+INPUT_SIZE = 640
+CONF_THRESH = 0.4
+# ==============================================================================
 
 # 1. Target AMD Radeon 890M (RDNA 3.5 / gfx1150)
 os.environ["HSA_OVERRIDE_GFX_VERSION"] = "11.5.0"
 os.environ["ROCM_PATH"] = "/opt/rocm"
 os.environ["MIGRAPHX_ENABLE_MLIR"] = "0"
 
-# 2. MIGraphX Cache Configuration (Requires a directory, not a file)
+# 2. MIGraphX Cache Configuration
 cache_dir = "models/migraphx_cache"
 os.makedirs(cache_dir, exist_ok=True)
 
-# Check if any precompiled .mxr files already exist in the cache directory
 is_cached = any(f.endswith(".mxr") for f in os.listdir(cache_dir))
-
 cache_dir_abs = os.path.abspath(cache_dir)
 os.environ["ORT_MIGRAPHX_MODEL_CACHE_PATH"] = cache_dir_abs
 os.environ["ORT_MIGRAPHX_CACHE_PATH"] = cache_dir_abs
@@ -38,10 +44,8 @@ else:
     os.environ["ORT_MIGRAPHX_LOAD_COMPILED_MODEL"] = "0"
 
 providers = [("MIGraphXExecutionProvider", migraphx_options)]
-
 session = ort.InferenceSession("models/puck-eye-seg-s.onnx", providers=providers)
 input_name = session.get_inputs()[0].name
-INPUT_SIZE = 640
 
 # 3. Initialize ByteTrack
 tracker = ByteTrack(
@@ -96,14 +100,19 @@ def process_mask(protos, mask_coeffs, bboxes, shape):
     )
 
 
-def postprocess(preds, protos, orig_shape, ratio, pad, conf_thresh=0.4):
+def postprocess(
+    preds, protos, orig_shape, ratio, pad, conf_thresh=CONF_THRESH, num_classes=NUM_CLASSES
+):
     p = np.squeeze(preds)
     if p.shape[0] < p.shape[1]:
         p = p.T
 
+    protos = np.squeeze(protos)
+    num_protos = protos.shape[0]
+
     boxes = p[:, :4]  # cx, cy, w, h
-    scores = p[:, 4:84]  # 80 classes
-    mask_coeffs = p[:, 84:]  # 32 protos
+    scores = p[:, 4 : 4 + num_classes]
+    mask_coeffs = p[:, 4 + num_classes : 4 + num_classes + num_protos]
 
     class_ids = np.argmax(scores, axis=1)
     confidences = np.max(scores, axis=1)
@@ -134,7 +143,6 @@ def postprocess(preds, protos, orig_shape, ratio, pad, conf_thresh=0.4):
     xyxy[:, [0, 2]] = np.clip(xyxy[:, [0, 2]], 0, orig_shape[1])
     xyxy[:, [1, 3]] = np.clip(xyxy[:, [1, 3]], 0, orig_shape[0])
 
-    protos = np.squeeze(protos)
     masks = process_mask(protos, mask_coeffs, xyxy, orig_shape)
 
     return xyxy, confidences, class_ids, masks
