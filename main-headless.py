@@ -19,7 +19,7 @@ NUM_CLASSES = 2  # Set to 80 for standard COCO or your custom class count
 NUM_MASK_COEFFS = 32  # Standard YOLO prototype mask coefficients
 INPUT_SIZE = 640
 CONF_THRESH = 0.40
-IOU_THRESH = 0.45  # NMS IoU Threshold
+IOU_THRESH = 0.40  # NMS IoU Threshold
 # ==============================================================================
 
 # 1. Target AMD Radeon 890M (RDNA 3.5 / gfx1150)
@@ -202,7 +202,7 @@ def process_frame(frame_bytes: bytes, session_tracker: ByteTrack) -> tuple[dict 
 
     # Postprocessing
     boxes, confs, class_ids, masks = postprocess(
-        outputs[0], outputs[1], orig_shape, ratio, pad, conf_thresh=0.05
+        outputs[0], outputs[1], orig_shape, ratio, pad, conf_thresh=CONF_THRESH
     )
     t4 = time.perf_counter()
 

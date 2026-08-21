@@ -50,12 +50,6 @@ uv pip install opencv-python supervision
 
 ## python headless
 uv pip install fastapi uvicorn websockets
-
-# 3. Add rocm specific pytorch wheel (if needed)
-python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ \
-    "torch[device-gfx1150]==2.12.0+rocm7.14.0" \
-    "torchvision[device-gfx1150]==0.27.0+rocm7.14.0" \
-    "torchaudio==2.11.0+rocm7.14.0"
 ```
 
 ---
