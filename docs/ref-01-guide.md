@@ -79,6 +79,6 @@ uv run python main.py
 #### First Run Compile
 
 yolo26s-seg.onnx: 10 minutes
-yolo26n-seg.onnx: 5 minutes
+yolo26n-seg.onnx: 6 minutes
 
 CPU will spike, then GPU will spike
