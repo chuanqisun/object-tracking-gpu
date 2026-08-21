@@ -138,12 +138,11 @@ def postprocess(
     protos = np.squeeze(protos)
     num_protos = protos.shape[0]
 
-    boxes = p[:, :4]  # cx, cy, w, h
-    scores = p[:, 4 : 4 + num_classes]
-    mask_coeffs = p[:, 4 + num_classes : 4 + num_classes + num_protos]
-
-    class_ids = np.argmax(scores, axis=1)
-    confidences = np.max(scores, axis=1)
+    # YOLO26 exports end-to-end detections as xyxy, confidence, class_id, masks.
+    boxes = p[:, :4]
+    confidences = p[:, 4]
+    class_ids = p[:, 5].astype(np.int32)
+    mask_coeffs = p[:, 6 : 6 + num_protos]
 
     # 1. Confidence filtering
     keep = confidences > conf_thresh
@@ -155,33 +154,11 @@ def postprocess(
     if len(boxes) == 0:
         return np.empty((0, 4)), np.empty(0), np.empty(0), np.empty((0, *orig_shape))
 
-    # Convert to xywh for OpenCV NMS (top-left x, y, w, h)
-    nms_boxes = np.copy(boxes)
-    nms_boxes[:, 0] = boxes[:, 0] - boxes[:, 2] / 2
-    nms_boxes[:, 1] = boxes[:, 1] - boxes[:, 3] / 2
-
-    # 2. Fast OpenCV NMS (Eliminates redundant duplicated boxes)
-    indices = cv2.dnn.NMSBoxes(
-        bboxes=nms_boxes.tolist(),
-        scores=confidences.tolist(),
-        score_threshold=conf_thresh,
-        nms_threshold=iou_thresh,
-    )
-
-    if len(indices) == 0:
-        return np.empty((0, 4)), np.empty(0), np.empty(0), np.empty((0, *orig_shape))
-
-    indices = indices.flatten()
-    boxes = boxes[indices]
-    confidences = confidences[indices]
-    class_ids = class_ids[indices]
-    mask_coeffs = mask_coeffs[indices]
-
-    # Convert to xyxy and invert letterbox mapping
-    x1 = (boxes[:, 0] - boxes[:, 2] / 2 - pad[0]) / ratio
-    y1 = (boxes[:, 1] - boxes[:, 3] / 2 - pad[1]) / ratio
-    x2 = (boxes[:, 0] + boxes[:, 2] / 2 - pad[0]) / ratio
-    y2 = (boxes[:, 1] + boxes[:, 3] / 2 - pad[1]) / ratio
+    # The export already applied confidence filtering and NMS; only undo padding.
+    x1 = (boxes[:, 0] - pad[0]) / ratio
+    y1 = (boxes[:, 1] - pad[1]) / ratio
+    x2 = (boxes[:, 2] - pad[0]) / ratio
+    y2 = (boxes[:, 3] - pad[1]) / ratio
 
     xyxy = np.column_stack([
         np.clip(x1, 0, orig_shape[1]),
@@ -190,7 +167,7 @@ def postprocess(
         np.clip(y2, 0, orig_shape[0]),
     ])
 
-    # 3. Compute segmentation masks only on NMS-surviving boxes
+    # Compute segmentation masks only on confidence-surviving boxes.
     masks = process_mask_fast(protos, mask_coeffs, xyxy, orig_shape, pad, ratio)
 
     return xyxy, confidences, class_ids, masks
