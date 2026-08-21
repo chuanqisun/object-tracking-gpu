@@ -1,5 +1,7 @@
 import os
 import time
+from collections import deque
+
 import cv2
 import numpy as np
 import onnxruntime as ort
@@ -8,7 +10,7 @@ from supervision import ByteTrack, Detections
 # ==============================================================================
 # Model Configuration
 # ==============================================================================
-NUM_CLASSES = 80  # Set to 80 for standard COCO or your custom class count
+NUM_CLASSES = 2  # Set to 80 for standard COCO or your custom class count
 NUM_MASK_COEFFS = 32  # Standard YOLO prototype mask coefficients
 INPUT_SIZE = 640
 CONF_THRESH = 0.40
@@ -46,7 +48,7 @@ else:
     os.environ["ORT_MIGRAPHX_LOAD_COMPILED_MODEL"] = "0"
 
 providers = [("MIGraphXExecutionProvider", migraphx_options)]
-session = ort.InferenceSession("models/yolo26n-seg.onnx", providers=providers)
+session = ort.InferenceSession("models/puck-eye-seg-s.onnx", providers=providers)
 input_name = session.get_inputs()[0].name
 
 # 3. Initialize ByteTrack
@@ -197,11 +199,12 @@ def postprocess(
 def main():
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    fps_window = deque(maxlen=120)
 
     print("Running optimized YOLO-seg + ByteTrack on Radeon 890M iGPU...")
 
     while cap.isOpened():
-        start_t = time.perf_counter()
+        frame_start = time.perf_counter()
         ret, frame = cap.read()
         if not ret:
             break
@@ -254,10 +257,18 @@ def main():
                     2,
                 )
 
-        fps = 1.0 / (time.perf_counter() - start_t)
+        fps_window.append(time.perf_counter())
+        while fps_window and fps_window[-1] - fps_window[0] > 1.0:
+            fps_window.popleft()
+
+        if len(fps_window) > 1:
+            avg_fps = (len(fps_window) - 1) / (fps_window[-1] - fps_window[0])
+        else:
+            avg_fps = 0.0
+
         cv2.putText(
             frame,
-            f"FPS: {fps:.1f} (Radeon 890M)",
+            f"FPS: {avg_fps:.1f} (Radeon 890M)",
             (15, 30),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.8,
