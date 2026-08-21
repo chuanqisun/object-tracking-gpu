@@ -44,7 +44,12 @@ uv pip install https://rocm.frameworks.amd.com/whl-multi-arch/onnxruntime-migrap
 
 ```bash
 # 2. Add standard runtime & tracking dependencies
+
+## python full stack
 uv pip install opencv-python supervision
+
+## python headless
+uv pip install fastapi uvicorn websockets
 
 # 3. Add rocm specific pytorch wheel (if needed)
 python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ \
@@ -74,6 +79,12 @@ Launch the script directly with `uv`:
 ```bash
 export LD_LIBRARY_PATH=/opt/rocm-7.2.4/lib:/opt/rocm/lib:$LD_LIBRARY_PATH
 uv run python main.py
+```
+
+Run the headless server
+
+```bash
+uv run python main-headless.py
 ```
 
 #### First Run Compile
