@@ -10,10 +10,10 @@ uv init --app --python 3.12
 
 Install vendor packages
 
-- [ROCm](https://rocm.docs.amd.com/en/docs-7.14.0/install/rocm.html?fam=all&w=compute&os=ubuntu&ubuntu-ver=26.04&i=pip)
+- [ROCm](https://rocm.docs.amd.com/en/docs-7.14.0/install/rocm.html?fam=ryzen&w=compute&gpu=9-hx-370&gfx=gfx1150&os=ubuntu&ubuntu-ver=26.04&i=pip)
 
 ```sh
-uv pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,device-gfx1151]==7.14.0"
+python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,device-gfx1150]==7.14.0"
 
 sudo ln -s /opt/rocm-7.2.4 /opt/rocm
 ```
