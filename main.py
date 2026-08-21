@@ -8,10 +8,11 @@ from supervision import ByteTrack, Detections
 # ==============================================================================
 # Model Configuration
 # ==============================================================================
-NUM_CLASSES = 2  # Set to 80 for standard COCO or your custom class count
-NUM_MASK_COEFFS = 32  # Standard YOLO prototype mask coefficients (default 32)
+NUM_CLASSES = 80  # Set to 80 for standard COCO or your custom class count
+NUM_MASK_COEFFS = 32  # Standard YOLO prototype mask coefficients
 INPUT_SIZE = 640
-CONF_THRESH = 0.4
+CONF_THRESH = 0.40
+IOU_THRESH = 0.45  # NMS IoU Threshold
 # ==============================================================================
 
 # 1. Target AMD Radeon 890M (RDNA 3.5 / gfx1150)
@@ -31,7 +32,8 @@ os.environ["ORT_MIGRAPHX_CACHE_PATH"] = cache_dir_abs
 migraphx_options = {
     "device_id": 0,
     "migraphx_fp16_enable": True,
-    "migraphx_exhaustive_tune": False,
+    # Set to True on first compile to find fastest kernel variants on 890M
+    "migraphx_exhaustive_tune": not is_cached,
 }
 
 if is_cached:
@@ -39,28 +41,26 @@ if is_cached:
     os.environ["ORT_MIGRAPHX_LOAD_COMPILED_MODEL"] = "1"
     os.environ["ORT_MIGRAPHX_SAVE_COMPILED_MODEL"] = "0"
 else:
-    print(f"No compiled cache found. Compiling and saving to {cache_dir}...")
+    print(f"Compiling optimized MIGraphX kernels to {cache_dir}...")
     os.environ["ORT_MIGRAPHX_SAVE_COMPILED_MODEL"] = "1"
     os.environ["ORT_MIGRAPHX_LOAD_COMPILED_MODEL"] = "0"
 
 providers = [("MIGraphXExecutionProvider", migraphx_options)]
-session = ort.InferenceSession("models/puck-eye-seg-s.onnx", providers=providers)
+session = ort.InferenceSession("models/yolo26n-seg.onnx", providers=providers)
 input_name = session.get_inputs()[0].name
 
 # 3. Initialize ByteTrack
 tracker = ByteTrack(
-    track_activation_threshold=0.35, lost_track_buffer=30, frame_rate=30
+    track_activation_threshold=0.35, lost_track_buffer=30, frame_rate=60
 )
 
 
 def letterbox(img, new_shape=(640, 640), color=(114, 114, 114)):
-    """Maintain aspect ratio with uniform padding."""
+    """Aspect-ratio preserving padding."""
     shape = img.shape[:2]  # [h, w]
     r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
     new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
-    dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]
-    dw /= 2
-    dh /= 2
+    dw, dh = (new_shape[1] - new_unpad[0]) / 2, (new_shape[0] - new_unpad[1]) / 2
 
     if shape[::-1] != new_unpad:
         img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
@@ -72,36 +72,62 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114)):
     return img, r, (dw, dh)
 
 
-def process_mask(protos, mask_coeffs, bboxes, shape):
-    """Vectorized sigmoid and prototype matrix multiplication."""
+def process_mask_fast(protos, mask_coeffs, bboxes, orig_shape, pad, ratio):
+    """
+    Optimized mask processing:
+    Computes masks directly on letterboxed prototype dimensions and maps to orig_shape.
+    """
     c, mh, mw = protos.shape
-    masks = 1 / (1 + np.exp(-np.matmul(mask_coeffs, protos.reshape(c, -1))))
+    # Matrix multiply: (N, 32) @ (32, mh * mw) -> (N, mh, mw)
+    masks = np.matmul(mask_coeffs, protos.reshape(c, -1))
+    # In-place sigmoid
+    masks = 1 / (1 + np.exp(-masks))
     masks = masks.reshape(-1, mh, mw)
 
     scaled_masks = []
+    pad_w, pad_h = pad
     for i, box in enumerate(bboxes):
-        x1, y1, x2, y2 = box.astype(int)
-        mx1 = max(0, int(x1 * (mw / shape[1])))
-        my1 = max(0, int(y1 * (mh / shape[0])))
-        mx2 = min(mw, int(x2 * (mw / shape[1])))
-        my2 = min(mh, int(y2 * (mh / shape[0])))
-
         mask = masks[i]
+
+        # Calculate bounding box coordinates on prototype mask resolution (160x160)
+        # 1. Map orig_shape box back to letterboxed 640x640 space
+        x1_pad = box[0] * ratio + pad_w
+        y1_pad = box[1] * ratio + pad_h
+        x2_pad = box[2] * ratio + pad_w
+        y2_pad = box[3] * ratio + pad_h
+
+        # 2. Scale 640x640 space down to prototype space (mh, mw)
+        scale_x = mw / INPUT_SIZE
+        scale_y = mh / INPUT_SIZE
+        mx1 = max(0, int(x1_pad * scale_x))
+        my1 = max(0, int(y1_pad * scale_y))
+        mx2 = min(mw, int(x2_pad * scale_x))
+        my2 = min(mh, int(y2_pad * scale_y))
+
+        # Crop outside of box
         cropped_mask = np.zeros_like(mask)
         cropped_mask[my1:my2, mx1:mx2] = mask[my1:my2, mx1:mx2]
 
-        full_mask = cv2.resize(
-            cropped_mask, (shape[1], shape[0]), interpolation=cv2.INTER_LINEAR
-        )
-        scaled_masks.append(full_mask > 0.5)
+        # Un-pad and resize only to original shape
+        unpad_h = int(round(orig_shape[0] * ratio * scale_y))
+        unpad_w = int(round(orig_shape[1] * ratio * scale_x))
+        pad_top = int(round(pad_h * scale_y))
+        pad_left = int(round(pad_w * scale_x))
 
-    return (
-        np.array(scaled_masks) if len(scaled_masks) > 0 else np.empty((0, *shape))
-    )
+        mask_unpad = cropped_mask[pad_top : pad_top + unpad_h, pad_left : pad_left + unpad_w]
+        if mask_unpad.size == 0:
+            full_mask = np.zeros(orig_shape, dtype=bool)
+        else:
+            full_mask = cv2.resize(
+                mask_unpad, (orig_shape[1], orig_shape[0]), interpolation=cv2.INTER_LINEAR
+            ) > 0.5
+        scaled_masks.append(full_mask)
+
+    return np.array(scaled_masks) if len(scaled_masks) > 0 else np.empty((0, *orig_shape), dtype=bool)
 
 
 def postprocess(
-    preds, protos, orig_shape, ratio, pad, conf_thresh=CONF_THRESH, num_classes=NUM_CLASSES
+    preds, protos, orig_shape, ratio, pad, conf_thresh=CONF_THRESH, iou_thresh=IOU_THRESH, num_classes=NUM_CLASSES
 ):
     p = np.squeeze(preds)
     if p.shape[0] < p.shape[1]:
@@ -117,6 +143,7 @@ def postprocess(
     class_ids = np.argmax(scores, axis=1)
     confidences = np.max(scores, axis=1)
 
+    # 1. Confidence filtering
     keep = confidences > conf_thresh
     boxes = boxes[keep]
     confidences = confidences[keep]
@@ -124,26 +151,45 @@ def postprocess(
     mask_coeffs = mask_coeffs[keep]
 
     if len(boxes) == 0:
-        return (
-            np.empty((0, 4)),
-            np.empty(0),
-            np.empty(0),
-            np.empty((0, *orig_shape)),
-        )
+        return np.empty((0, 4)), np.empty(0), np.empty(0), np.empty((0, *orig_shape))
 
-    # Box conversion & Letterbox inversion
-    x1 = boxes[:, 0] - boxes[:, 2] / 2
-    y1 = boxes[:, 1] - boxes[:, 3] / 2
-    x2 = boxes[:, 0] + boxes[:, 2] / 2
-    y2 = boxes[:, 1] + boxes[:, 3] / 2
-    xyxy = np.column_stack([x1, y1, x2, y2])
+    # Convert to xywh for OpenCV NMS (top-left x, y, w, h)
+    nms_boxes = np.copy(boxes)
+    nms_boxes[:, 0] = boxes[:, 0] - boxes[:, 2] / 2
+    nms_boxes[:, 1] = boxes[:, 1] - boxes[:, 3] / 2
 
-    xyxy[:, [0, 2]] = (xyxy[:, [0, 2]] - pad[0]) / ratio
-    xyxy[:, [1, 3]] = (xyxy[:, [1, 3]] - pad[1]) / ratio
-    xyxy[:, [0, 2]] = np.clip(xyxy[:, [0, 2]], 0, orig_shape[1])
-    xyxy[:, [1, 3]] = np.clip(xyxy[:, [1, 3]], 0, orig_shape[0])
+    # 2. Fast OpenCV NMS (Eliminates redundant duplicated boxes)
+    indices = cv2.dnn.NMSBoxes(
+        bboxes=nms_boxes.tolist(),
+        scores=confidences.tolist(),
+        score_threshold=conf_thresh,
+        nms_threshold=iou_thresh,
+    )
 
-    masks = process_mask(protos, mask_coeffs, xyxy, orig_shape)
+    if len(indices) == 0:
+        return np.empty((0, 4)), np.empty(0), np.empty(0), np.empty((0, *orig_shape))
+
+    indices = indices.flatten()
+    boxes = boxes[indices]
+    confidences = confidences[indices]
+    class_ids = class_ids[indices]
+    mask_coeffs = mask_coeffs[indices]
+
+    # Convert to xyxy and invert letterbox mapping
+    x1 = (boxes[:, 0] - boxes[:, 2] / 2 - pad[0]) / ratio
+    y1 = (boxes[:, 1] - boxes[:, 3] / 2 - pad[1]) / ratio
+    x2 = (boxes[:, 0] + boxes[:, 2] / 2 - pad[0]) / ratio
+    y2 = (boxes[:, 1] + boxes[:, 3] / 2 - pad[1]) / ratio
+
+    xyxy = np.column_stack([
+        np.clip(x1, 0, orig_shape[1]),
+        np.clip(y1, 0, orig_shape[0]),
+        np.clip(x2, 0, orig_shape[1]),
+        np.clip(y2, 0, orig_shape[0]),
+    ])
+
+    # 3. Compute segmentation masks only on NMS-surviving boxes
+    masks = process_mask_fast(protos, mask_coeffs, xyxy, orig_shape, pad, ratio)
 
     return xyxy, confidences, class_ids, masks
 
@@ -152,7 +198,7 @@ def main():
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-    print("Running YOLO26s-seg + ByteTrack on Radeon 890M iGPU...")
+    print("Running optimized YOLO-seg + ByteTrack on Radeon 890M iGPU...")
 
     while cap.isOpened():
         start_t = time.perf_counter()
@@ -162,15 +208,16 @@ def main():
 
         orig_shape = frame.shape[:2]
 
-        # Preprocessing
+        # Fast Preprocessing using cv2.dnn.blobFromImage
         img, ratio, pad = letterbox(frame, (INPUT_SIZE, INPUT_SIZE))
-        blob = cv2.cvtColor(img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-        blob = np.transpose(blob, (2, 0, 1))[np.newaxis, ...]
+        blob = cv2.dnn.blobFromImage(
+            img, scalefactor=1.0 / 255.0, size=(INPUT_SIZE, INPUT_SIZE), swapRB=True, crop=False
+        )
 
         # iGPU Inference
         outputs = session.run(None, {input_name: blob})
 
-        # Postprocessing
+        # Postprocessing + NMS
         boxes, confs, class_ids, masks = postprocess(
             outputs[0], outputs[1], orig_shape, ratio, pad
         )
@@ -185,8 +232,15 @@ def main():
 
             tracked = tracker.update_with_detections(detections)
 
-            for i, (xyxy, track_id, cls) in enumerate(
-                zip(tracked.xyxy, tracked.tracker_id, tracked.class_id)
+            # Combined Mask Overlay (Fast Vectorized Blend)
+            if tracked.mask is not None and len(tracked.mask) > 0:
+                combined_mask = np.any(tracked.mask, axis=0)
+                mask_overlay = np.zeros_like(frame)
+                mask_overlay[combined_mask] = (0, 165, 255)
+                cv2.addWeighted(mask_overlay, 0.4, frame, 1.0, 0, dst=frame)
+
+            for xyxy, track_id, cls in zip(
+                tracked.xyxy, tracked.tracker_id, tracked.class_id
             ):
                 x1, y1, x2, y2 = map(int, xyxy)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 120), 2)
@@ -200,12 +254,6 @@ def main():
                     2,
                 )
 
-                if tracked.mask is not None and i < len(tracked.mask):
-                    mask = tracked.mask[i]
-                    colored_mask = np.zeros_like(frame, dtype=np.uint8)
-                    colored_mask[mask] = (0, 165, 255)
-                    frame = cv2.addWeighted(frame, 1.0, colored_mask, 0.4, 0)
-
         fps = 1.0 / (time.perf_counter() - start_t)
         cv2.putText(
             frame,
@@ -217,7 +265,7 @@ def main():
             2,
         )
 
-        cv2.imshow("YOLO26s-seg + ByteTrack", frame)
+        cv2.imshow("YOLO-seg + ByteTrack", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
