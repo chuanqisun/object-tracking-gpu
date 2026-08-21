@@ -39,7 +39,7 @@ else:
 
 providers = [("MIGraphXExecutionProvider", migraphx_options)]
 
-session = ort.InferenceSession("models/yolo26s-seg.onnx", providers=providers)
+session = ort.InferenceSession("models/puck-eye-seg-s.onnx", providers=providers)
 input_name = session.get_inputs()[0].name
 INPUT_SIZE = 640
 
