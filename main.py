@@ -9,15 +9,18 @@ from supervision import ByteTrack, Detections
 # 1. Target AMD Radeon 890M (RDNA 3.5 / gfx1150)
 os.environ["HSA_OVERRIDE_GFX_VERSION"] = "11.5.0"
 os.environ["ROCM_PATH"] = "/opt/rocm"
-
-
 os.environ["MIGRAPHX_ENABLE_MLIR"] = "0"
 
-cache_path = "models/yolo26s-seg.mxr"
-is_cached = os.path.exists(cache_path)
+# 2. MIGraphX Cache Configuration (Requires a directory, not a file)
+cache_dir = "models/migraphx_cache"
+os.makedirs(cache_dir, exist_ok=True)
 
-# Current MIGraphX builds read the compiled-model path from the environment.
-os.environ["ORT_MIGRAPHX_MODEL_CACHE_PATH"] = os.path.abspath(cache_path)
+# Check if any precompiled .mxr files already exist in the cache directory
+is_cached = any(f.endswith(".mxr") for f in os.listdir(cache_dir))
+
+cache_dir_abs = os.path.abspath(cache_dir)
+os.environ["ORT_MIGRAPHX_MODEL_CACHE_PATH"] = cache_dir_abs
+os.environ["ORT_MIGRAPHX_CACHE_PATH"] = cache_dir_abs
 
 migraphx_options = {
     "device_id": 0,
@@ -26,15 +29,17 @@ migraphx_options = {
 }
 
 if is_cached:
-    print(f"Loading compiled MIGraphX cache from {cache_path}...")
+    print(f"Loading compiled MIGraphX cache from {cache_dir}...")
     os.environ["ORT_MIGRAPHX_LOAD_COMPILED_MODEL"] = "1"
+    os.environ["ORT_MIGRAPHX_SAVE_COMPILED_MODEL"] = "0"
 else:
-    print(f"No compiled cache found. Compiling and saving to {cache_path}...")
+    print(f"No compiled cache found. Compiling and saving to {cache_dir}...")
     os.environ["ORT_MIGRAPHX_SAVE_COMPILED_MODEL"] = "1"
+    os.environ["ORT_MIGRAPHX_LOAD_COMPILED_MODEL"] = "0"
 
 providers = [("MIGraphXExecutionProvider", migraphx_options)]
 
-session = ort.InferenceSession("models/yolo26s-seg.onnx", providers=providers)
+session = ort.InferenceSession("models/yolo26n-seg.onnx", providers=providers)
 input_name = session.get_inputs()[0].name
 INPUT_SIZE = 640
 
