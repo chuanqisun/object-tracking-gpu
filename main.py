@@ -1,73 +1,3 @@
-### Step 1: Project Setup with `uv`
-
-Initialize a new `uv` project directory and target Python 3.12 (standard for modern ROCm/MIGraphX wheels):
-
-```bash
-# 1. Initialize project
-mkdir yolo26_tracker && cd yolo26_tracker
-uv init --app --python 3.12
-```
-
-Install vendor packages
-
-- [ROCm](https://rocm.docs.amd.com/en/docs-7.14.0/install/rocm.html?fam=all&w=compute&os=ubuntu&ubuntu-ver=26.04&i=pip)
-
-```sh
-uv pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,device-gfx1151]==7.14.0"
-```
-
-- [MIGraphX](https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/inference/migraphx.html?i=pkgman)
-
-```sh
-wget https://rocm.frameworks.amd.com/whl-multi-arch/migraphx/migraphx-2.16.0%2Brocm7.14.0-cp312-none-manylinux_2_28_x86_64.whl
-uv pip install migraphx-2.16.0+rocm7.14.0-cp312-none-manylinux_2_28_x86_64.whl
-```
-
-- [PyTorch for ROCm](https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/frameworks/pytorch/install.html?fam=ryzen&os=linux&i=pip&w=compute&gpu=9-hx-370&gfx=gfx1150&pytorch-ver=2.12.0)
-
-```sh
-uv pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ \
-    "torch[device-gfx1150]==2.12.0+rocm7.14.0" \
-    "torchvision[device-gfx1150]==0.27.0+rocm7.14.0" \
-    "torchaudio==2.11.0+rocm7.14.0"
-```
-
-- [onnx for ROCm](https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/inference/onnxruntime.html)
-
-```sh
-uv pip install https://rocm.frameworks.amd.com/whl-multi-arch/onnxruntime-migraphx/onnxruntime_migraphx-1.23.2%2Brocm7.14.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
-```
-
-```bash
-# 2. Add standard runtime & tracking dependencies
-uv pip install opencv-python supervision
-
-# 3. Add rocm specific pytorch wheel (if needed)
-python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ \
-    "torch[device-gfx1150]==2.12.0+rocm7.14.0" \
-    "torchvision[device-gfx1150]==0.27.0+rocm7.14.0" \
-    "torchaudio==2.11.0+rocm7.14.0"
-```
-
----
-
-### Step 2: Export `yolo26s-seg.pt` to FP16 ONNX
-
-Run the export tool via `uv run` inside your project environment:
-
-```bash
-uv run yolo export model=yolo26s-seg.pt format=onnx imgsz=640 half=True simplify=True
-```
-
-_This produces `yolo26s-seg.onnx` in your current directory._
-
----
-
-### Step 3: Complete Python Implementation (`main.py`)
-
-Replace `main.py` with the following optimized implementation:
-
-```python
 import os
 import time
 import cv2
@@ -79,6 +9,13 @@ from supervision import ByteTrack, Detections
 os.environ["HSA_OVERRIDE_GFX_VERSION"] = "11.5.0"
 os.environ["ROCM_PATH"] = "/opt/rocm"
 
+# Set target directory where compiled *.mxr kernels will be stored
+# os.environ["ORT_MIGRAPHX_CACHE_PATH"] = "/home/stack/repos/object-tracking-gpu/model-cache"
+# os.environ["ORT_MIGRAPHX_SAVE_COMPILED_MODEL"] = "1"
+# os.environ["ORT_MIGRAPHX_LOAD_COMPILED_MODEL"] = "1"
+
+os.environ["MIGRAPHX_ENABLE_MLIR"] = "0"
+
 # 2. Configure Execution Providers (Strictly iGPU FP16)
 providers = [
     (
@@ -86,21 +23,25 @@ providers = [
         {
             "device_id": 0,
             "migraphx_fp16_enable": True,
-            "migraphx_exhaustive_tune": False,
+            # "migraphx_exhaustive_tune": False,
+            # "migraphx_load_compiled_model": True,
+            # "migraphx_save_compiled_path": "models/yolo26s-seg-compiled.mxr",
+            # "migraphx_load_compiled_path": "models/yolo26s-seg-compiled.mxr",
         },
     ),
-    (
-        "ROCMExecutionProvider",
-        {
-            "device_id": 0,
-            "tunable_op_enable": 1,
-            "tunable_op_tuning_enable": 0,
-        },
-    ),
+    # Choose which
+    # (
+    #     "ROCMExecutionProvider",
+    #     {
+    #         "device_id": 0,
+    #         "tunable_op_enable": 1,
+    #         "tunable_op_tuning_enable": 0,
+    #     },
+    # ),
 ]
 
 # Initialize Session
-session = ort.InferenceSession("yolo26s-seg.onnx", providers=providers)
+session = ort.InferenceSession("models/yolo26s-seg.onnx", providers=providers)
 input_name = session.get_inputs()[0].name
 INPUT_SIZE = 640
 
@@ -280,15 +221,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-```
-
----
-
-### Step 4: Run the Application
-
-Launch the script directly with `uv`:
-
-```bash
-export LD_LIBRARY_PATH=/opt/rocm-7.2.4/lib:/opt/rocm/lib:$LD_LIBRARY_PATH
-uv run python main.py
-```

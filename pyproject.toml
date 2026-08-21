@@ -7,13 +7,7 @@ authors = [
     { name = "Chuanqi Sun", email = "chuanqi.sun.15@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = [
-    "numpy>=2.5.2",
-    "onnx>=1.22.0",
-    "opencv-python>=5.0.0.93",
-    "supervision>=0.30.0",
-    "ultralytics>=8.4.124",
-]
+dependencies = []
 
 [project.scripts]
 object-tracking-gpu = "object_tracking_gpu:main"
