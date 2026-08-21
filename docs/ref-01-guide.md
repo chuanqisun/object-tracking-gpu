@@ -14,7 +14,11 @@ Install vendor packages
 
 ```sh
 uv pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,device-gfx1151]==7.14.0"
+
+sudo ln -s /opt/rocm-7.2.4 /opt/rocm
 ```
+
+(to uninstall, you need to manually remove the symbolic link and uninstall the package)
 
 - [MIGraphX](https://rocm.docs.amd.com/projects/ai-ecosystem/en/latest/inference/migraphx.html?i=pkgman)
 

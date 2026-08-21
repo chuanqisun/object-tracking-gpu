@@ -5,42 +5,35 @@ import numpy as np
 import onnxruntime as ort
 from supervision import ByteTrack, Detections
 
+
 # 1. Target AMD Radeon 890M (RDNA 3.5 / gfx1150)
 os.environ["HSA_OVERRIDE_GFX_VERSION"] = "11.5.0"
 os.environ["ROCM_PATH"] = "/opt/rocm"
 
-# Set target directory where compiled *.mxr kernels will be stored
-# os.environ["ORT_MIGRAPHX_CACHE_PATH"] = "/home/stack/repos/object-tracking-gpu/model-cache"
-# os.environ["ORT_MIGRAPHX_SAVE_COMPILED_MODEL"] = "1"
-# os.environ["ORT_MIGRAPHX_LOAD_COMPILED_MODEL"] = "1"
 
 os.environ["MIGRAPHX_ENABLE_MLIR"] = "0"
 
-# 2. Configure Execution Providers (Strictly iGPU FP16)
-providers = [
-    (
-        "MIGraphXExecutionProvider",
-        {
-            "device_id": 0,
-            "migraphx_fp16_enable": True,
-            # "migraphx_exhaustive_tune": False,
-            # "migraphx_load_compiled_model": True,
-            # "migraphx_save_compiled_path": "models/yolo26s-seg-compiled.mxr",
-            # "migraphx_load_compiled_path": "models/yolo26s-seg-compiled.mxr",
-        },
-    ),
-    # Choose which
-    # (
-    #     "ROCMExecutionProvider",
-    #     {
-    #         "device_id": 0,
-    #         "tunable_op_enable": 1,
-    #         "tunable_op_tuning_enable": 0,
-    #     },
-    # ),
-]
+cache_path = "models/yolo26s-seg.mxr"
+is_cached = os.path.exists(cache_path)
 
-# Initialize Session
+# Current MIGraphX builds read the compiled-model path from the environment.
+os.environ["ORT_MIGRAPHX_MODEL_CACHE_PATH"] = os.path.abspath(cache_path)
+
+migraphx_options = {
+    "device_id": 0,
+    "migraphx_fp16_enable": True,
+    "migraphx_exhaustive_tune": False,
+}
+
+if is_cached:
+    print(f"Loading compiled MIGraphX cache from {cache_path}...")
+    os.environ["ORT_MIGRAPHX_LOAD_COMPILED_MODEL"] = "1"
+else:
+    print(f"No compiled cache found. Compiling and saving to {cache_path}...")
+    os.environ["ORT_MIGRAPHX_SAVE_COMPILED_MODEL"] = "1"
+
+providers = [("MIGraphXExecutionProvider", migraphx_options)]
+
 session = ort.InferenceSession("models/yolo26s-seg.onnx", providers=providers)
 input_name = session.get_inputs()[0].name
 INPUT_SIZE = 640
