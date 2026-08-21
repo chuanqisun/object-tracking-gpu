@@ -158,7 +158,22 @@ def postprocess(
     if len(boxes) == 0:
         return np.empty((0, 4)), np.empty(0), np.empty(0), np.empty((0, *orig_shape))
 
-    # The export already applied confidence filtering and NMS; only undo padding.
+    # 2. Batched NMS filtering (using OpenCV's C++ cv2.dnn.NMSBoxesBatched)
+    boxes_wh = boxes.copy()
+    boxes_wh[:, 2] -= boxes_wh[:, 0]
+    boxes_wh[:, 3] -= boxes_wh[:, 1]
+    nms_indices = cv2.dnn.NMSBoxesBatched(boxes_wh, confidences, class_ids, 0.0, iou_thresh)
+
+    if len(nms_indices) == 0:
+        return np.empty((0, 4)), np.empty(0), np.empty(0), np.empty((0, *orig_shape))
+
+    nms_indices = np.array(nms_indices).flatten()
+    boxes = boxes[nms_indices]
+    confidences = confidences[nms_indices]
+    class_ids = class_ids[nms_indices]
+    mask_coeffs = mask_coeffs[nms_indices]
+
+    # Undo padding
     x1 = (boxes[:, 0] - pad[0]) / ratio
     y1 = (boxes[:, 1] - pad[1]) / ratio
     x2 = (boxes[:, 2] - pad[0]) / ratio
