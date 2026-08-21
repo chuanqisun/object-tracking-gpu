@@ -1,5 +1,4 @@
 import os
-import threading
 import time
 from collections import deque
 
@@ -7,51 +6,6 @@ import cv2
 import numpy as np
 import onnxruntime as ort
 from supervision import ByteTrack, Detections
-
-
-class ThreadedCamera:
-    """Asynchronous camera frame reader to eliminate cap.read() blocking latency."""
-
-    def __init__(self, src=0, width=1280, height=720, fps=60):
-        self.cap = cv2.VideoCapture(src)
-        # Attempt setting MJPEG codec for higher framerate transfer
-        self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-        self.cap.set(cv2.CAP_PROP_FPS, fps)
-        self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-        self.grabbed, self.frame = self.cap.read()
-        self.started = False
-        self.read_lock = threading.Lock()
-
-    def start(self):
-        if self.started:
-            return self
-        self.started = True
-        self.thread = threading.Thread(target=self.update, args=(), daemon=True)
-        self.thread.start()
-        return self
-
-    def update(self):
-        while self.started:
-            grabbed, frame = self.cap.read()
-            if not grabbed:
-                self.started = False
-                break
-            with self.read_lock:
-                self.grabbed = grabbed
-                self.frame = frame
-
-    def read(self):
-        with self.read_lock:
-            return self.grabbed, None if self.frame is None else self.frame.copy()
-
-    def stop(self):
-        self.started = False
-        if hasattr(self, "thread"):
-            self.thread.join(timeout=1.0)
-        self.cap.release()
 
 # ==============================================================================
 # Model Configuration
@@ -220,142 +174,91 @@ def postprocess(
 
 
 def main():
-    cam = ThreadedCamera(src=0, fps=60).start()
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     fps_window = deque(maxlen=120)
 
     print("Running optimized YOLO-seg + ByteTrack on Radeon 890M iGPU...")
 
-    # Performance telemetry counters
-    frame_count = 0
-    t_read_list = []
-    t_prep_list = []
-    t_inf_list = []
-    t_post_list = []
-    t_track_list = []
-    t_render_list = []
-    t_display_list = []
-    t_total_list = []
+    while cap.isOpened():
+        frame_start = time.perf_counter()
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-    try:
-        while cam.started:
-            frame_start = time.perf_counter()
+        orig_shape = frame.shape[:2]
 
-            t0 = time.perf_counter()
-            ret, frame = cam.read()
-            t1 = time.perf_counter()
-            if not ret or frame is None:
-                time.sleep(0.001)
-                continue
+        # Fast Preprocessing using cv2.dnn.blobFromImage
+        img, ratio, pad = letterbox(frame, (INPUT_SIZE, INPUT_SIZE))
+        blob = cv2.dnn.blobFromImage(
+            img, scalefactor=1.0 / 255.0, size=(INPUT_SIZE, INPUT_SIZE), swapRB=True, crop=False
+        )
 
-            orig_shape = frame.shape[:2]
+        # iGPU Inference
+        outputs = session.run(None, {input_name: blob})
 
-            # Fast Preprocessing using cv2.dnn.blobFromImage
-            img, ratio, pad = letterbox(frame, (INPUT_SIZE, INPUT_SIZE))
-            blob = cv2.dnn.blobFromImage(
-                img, scalefactor=1.0 / 255.0, size=(INPUT_SIZE, INPUT_SIZE), swapRB=True, crop=False
+        # Postprocessing + NMS
+        boxes, confs, class_ids, masks = postprocess(
+            outputs[0], outputs[1], orig_shape, ratio, pad
+        )
+
+        if len(boxes) > 0:
+            detections = Detections(
+                xyxy=boxes,
+                confidence=confs,
+                class_id=class_ids,
+                mask=masks if len(masks) > 0 else None,
             )
-            t2 = time.perf_counter()
 
-            # iGPU Inference
-            outputs = session.run(None, {input_name: blob})
-            t3 = time.perf_counter()
+            tracked = tracker.update_with_detections(detections)
 
-            # Postprocessing + NMS
-            boxes, confs, class_ids, masks = postprocess(
-                outputs[0], outputs[1], orig_shape, ratio, pad
-            )
-            t4 = time.perf_counter()
+            # Combined Mask Overlay (Fast Vectorized Blend)
+            if tracked.mask is not None and len(tracked.mask) > 0:
+                combined_mask = np.any(tracked.mask, axis=0)
+                mask_overlay = np.zeros_like(frame)
+                mask_overlay[combined_mask] = (0, 165, 255)
+                cv2.addWeighted(mask_overlay, 0.4, frame, 1.0, 0, dst=frame)
 
-            # Tracking
-            if len(boxes) > 0:
-                detections = Detections(
-                    xyxy=boxes,
-                    confidence=confs,
-                    class_id=class_ids,
-                    mask=masks if len(masks) > 0 else None,
+            for xyxy, track_id, cls in zip(
+                tracked.xyxy, tracked.tracker_id, tracked.class_id
+            ):
+                x1, y1, x2, y2 = map(int, xyxy)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 120), 2)
+                cv2.putText(
+                    frame,
+                    f"ID #{track_id} - Class {cls}",
+                    (x1, max(20, y1 - 8)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    (0, 255, 120),
+                    2,
                 )
 
-                tracked = tracker.update_with_detections(detections)
-            else:
-                tracked = None
-            t5 = time.perf_counter()
+        fps_window.append(time.perf_counter())
+        while fps_window and fps_window[-1] - fps_window[0] > 1.0:
+            fps_window.popleft()
 
-            # Rendering / Mask overlay
-            if tracked is not None and len(tracked) > 0:
-                if tracked.mask is not None and len(tracked.mask) > 0:
-                    combined_mask = np.any(tracked.mask, axis=0)
-                    mask_overlay = np.zeros_like(frame)
-                    mask_overlay[combined_mask] = (0, 165, 255)
-                    cv2.addWeighted(mask_overlay, 0.4, frame, 1.0, 0, dst=frame)
+        if len(fps_window) > 1:
+            avg_fps = (len(fps_window) - 1) / (fps_window[-1] - fps_window[0])
+        else:
+            avg_fps = 0.0
 
-                for xyxy, track_id, cls in zip(
-                    tracked.xyxy, tracked.tracker_id, tracked.class_id
-                ):
-                    x1, y1, x2, y2 = map(int, xyxy)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 120), 2)
-                    cv2.putText(
-                        frame,
-                        f"ID #{track_id} - Class {cls}",
-                        (x1, max(20, y1 - 8)),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.55,
-                        (0, 255, 120),
-                        2,
-                    )
+        cv2.putText(
+            frame,
+            f"FPS: {avg_fps:.1f} (Radeon 890M)",
+            (15, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.8,
+            (0, 0, 255),
+            2,
+        )
 
-            fps_window.append(time.perf_counter())
-            while fps_window and fps_window[-1] - fps_window[0] > 1.0:
-                fps_window.popleft()
+        cv2.imshow("YOLO-seg + ByteTrack", frame)
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
 
-            if len(fps_window) > 1:
-                avg_fps = (len(fps_window) - 1) / (fps_window[-1] - fps_window[0])
-            else:
-                avg_fps = 0.0
-
-            cv2.putText(
-                frame,
-                f"FPS: {avg_fps:.1f} (Radeon 890M)",
-                (15, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.8,
-                (0, 0, 255),
-                2,
-            )
-            t6 = time.perf_counter()
-
-            # Display / GUI
-            cv2.imshow("YOLO-seg + ByteTrack", frame)
-            key = cv2.waitKey(1) & 0xFF
-            t7 = time.perf_counter()
-
-            t_read_list.append((t1 - t0) * 1000.0)
-            t_prep_list.append((t2 - t1) * 1000.0)
-            t_inf_list.append((t3 - t2) * 1000.0)
-            t_post_list.append((t4 - t3) * 1000.0)
-            t_track_list.append((t5 - t4) * 1000.0)
-            t_render_list.append((t6 - t5) * 1000.0)
-            t_display_list.append((t7 - t6) * 1000.0)
-            t_total_list.append((t7 - frame_start) * 1000.0)
-            frame_count += 1
-
-            if frame_count % 30 == 0:
-                n = 30
-                print(
-                    f"[Telemetry last 30 frames] Read: {np.mean(t_read_list[-n:]):.2f}ms | "
-                    f"Prep: {np.mean(t_prep_list[-n:]):.2f}ms | "
-                    f"Inf: {np.mean(t_inf_list[-n:]):.2f}ms | "
-                    f"Post: {np.mean(t_post_list[-n:]):.2f}ms | "
-                    f"Track: {np.mean(t_track_list[-n:]):.2f}ms | "
-                    f"Render: {np.mean(t_render_list[-n:]):.2f}ms | "
-                    f"Display: {np.mean(t_display_list[-n:]):.2f}ms | "
-                    f"Total: {np.mean(t_total_list[-n:]):.2f}ms ({1000.0 / np.mean(t_total_list[-n:]):.1f} FPS)"
-                )
-
-            if key == ord("q"):
-                break
-    finally:
-        cam.stop()
-        cv2.destroyAllWindows()
+    cap.release()
+    cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
