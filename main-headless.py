@@ -23,7 +23,6 @@ IOU_THRESH = 0.45  # NMS IoU Threshold
 # ==============================================================================
 
 # 1. Target AMD Radeon 890M (RDNA 3.5 / gfx1150)
-os.environ["HSA_OVERRIDE_GFX_VERSION"] = "11.5.0"
 os.environ["ROCM_PATH"] = "/opt/rocm"
 os.environ["MIGRAPHX_ENABLE_MLIR"] = "0"
 
