@@ -13,14 +13,15 @@ Install vendor packages
 - [ROCm](https://rocm.docs.amd.com/en/docs-7.14.0/install/rocm.html?fam=ryzen&w=compute&gpu=9-hx-370&gfx=gfx1150&os=ubuntu&ubuntu-ver=26.04&i=pip)
 
 ```sh
-sudo amdgpu-install --usecase=rocm --gfxversion=gfx1150 --no-dkms
+# This method won't create /opt/rocm/ folder. Use the apt install instead
+uv pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,device-gfx1150]==7.14.0"
+
+sudo ln -s /opt/rocm-7.2.4 /opt/rocm
 ```
 
 ```sh
-# This method won't create /opt/rocm/ folder. Use the apt install instead
-python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,device-gfx1150]==7.14.0"
-
-sudo ln -s /opt/rocm-7.2.4 /opt/rocm
+# This method doesn't work well with Python
+sudo amdgpu-install --usecase=rocm --gfxversion=gfx1150 --no-dkms
 ```
 
 (to uninstall, you need to manually remove the symbolic link and uninstall the package)
@@ -50,7 +51,7 @@ uv pip install https://rocm.frameworks.amd.com/whl-multi-arch/onnxruntime-migrap
 ```bash
 # 2. Add standard runtime & tracking dependencies
 
-## python full stack
+## python shared
 uv pip install opencv-python supervision
 
 ## python headless
@@ -76,7 +77,6 @@ _This produces `yolo26s-seg.onnx` in your current directory._
 Launch the script directly with `uv`:
 
 ```bash
-export LD_LIBRARY_PATH=/opt/rocm-7.2.4/lib:/opt/rocm/lib:$LD_LIBRARY_PATH
 uv run python main.py
 ```
 
