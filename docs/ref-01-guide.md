@@ -13,6 +13,11 @@ Install vendor packages
 - [ROCm](https://rocm.docs.amd.com/en/docs-7.14.0/install/rocm.html?fam=ryzen&w=compute&gpu=9-hx-370&gfx=gfx1150&os=ubuntu&ubuntu-ver=26.04&i=pip)
 
 ```sh
+sudo amdgpu-install --usecase=rocm --gfxversion=gfx1150 --no-dkms
+```
+
+```sh
+# This method won't create /opt/rocm/ folder. Use the apt install instead
 python -m pip install --index-url https://repo.amd.com/rocm/whl-multi-arch/ "rocm[libraries,device-gfx1150]==7.14.0"
 
 sudo ln -s /opt/rocm-7.2.4 /opt/rocm
