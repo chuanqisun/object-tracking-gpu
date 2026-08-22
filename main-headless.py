@@ -20,6 +20,10 @@ NUM_MASK_COEFFS = 32  # Standard YOLO prototype mask coefficients
 INPUT_SIZE = 640
 CONF_THRESH = 0.40
 IOU_THRESH = 0.40  # NMS IoU Threshold
+
+# MODEL_PATH = "models/puck-eye-seg-s-nms.onnx" # nms=True, end2end=False
+# MODEL_PATH = "models/puck-eye-seg-s.onnx" # nms=False, end2end=False
+MODEL_PATH = "models/puck-eye-seg-s-e2e.onnx" # nms=False, end2end=True
 # ==============================================================================
 
 # 1. Target AMD Radeon 890M (RDNA 3.5 / gfx1150)
@@ -39,7 +43,8 @@ migraphx_options = {
     "device_id": 0,
     "migraphx_fp16_enable": True,
     # Set to True on first compile to find fastest kernel variants on 890M
-    "migraphx_exhaustive_tune": not is_cached,
+    "migraphx_exhaustive_tune": False # Enable for finalized model. This can take hours.
+    # "migraphx_exhaustive_tune": not is_cached,
 }
 
 if is_cached:
@@ -52,7 +57,7 @@ else:
     os.environ["ORT_MIGRAPHX_LOAD_COMPILED_MODEL"] = "0"
 
 providers = [("MIGraphXExecutionProvider", migraphx_options)]
-session = ort.InferenceSession("models/puck-eye-seg-s.onnx", providers=providers)
+session = ort.InferenceSession(MODEL_PATH, providers=providers)
 input_name = session.get_inputs()[0].name
 
 # 3. Initialize ByteTrack
