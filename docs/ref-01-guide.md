@@ -80,15 +80,12 @@ Launch the script directly with `uv`:
 uv run python main.py
 ```
 
-Run the headless server
+Launch the frontend
 
 ```bash
-uv run python main-headless.py
+npx serve # open http://localhost:3000
 ```
 
 #### First Run Compile
 
-yolo26s-seg.onnx: 10 minutes
-yolo26n-seg.onnx: 6 minutes
-
-CPU will spike, then GPU will spike
+yolo26s-seg.onnx: 4-10 minutes
