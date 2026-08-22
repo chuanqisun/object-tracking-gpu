@@ -12,6 +12,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from supervision import ByteTrack, Detections
 
+# -limited: used max_det=10 for ONNX End2End export
+
 # ==============================================================================
 # Model Configuration
 # ==============================================================================

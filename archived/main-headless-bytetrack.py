@@ -10,6 +10,7 @@ import onnxruntime as ort
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
+from supervision import ByteTrack, Detections
 
 # ==============================================================================
 # Model Configuration
@@ -58,6 +59,11 @@ else:
 providers = [("MIGraphXExecutionProvider", migraphx_options)]
 session = ort.InferenceSession(MODEL_PATH, providers=providers)
 input_name = session.get_inputs()[0].name
+
+# 3. Initialize ByteTrack
+tracker = ByteTrack(
+    track_activation_threshold=0.35, lost_track_buffer=30, frame_rate=60
+)
 
 
 def letterbox(img, new_shape=(640, 640), color=(114, 114, 114)):
@@ -130,7 +136,7 @@ def postprocess(
     return xyxy, confidences, class_ids
 
 
-def process_frame(frame_bytes: bytes) -> tuple[dict | None, dict]:
+def process_frame(frame_bytes: bytes, session_tracker: ByteTrack) -> tuple[dict | None, dict]:
     t0 = time.perf_counter()
 
     # Decode image from binary buffer
@@ -162,11 +168,22 @@ def process_frame(frame_bytes: bytes) -> tuple[dict | None, dict]:
     detections_payload = []
 
     if len(boxes) > 0:
-        for box, score, cls in zip(boxes, confs, class_ids):
+        detections = Detections(
+            xyxy=boxes,
+            confidence=confs,
+            class_id=class_ids,
+        )
+
+        tracked = session_tracker.update_with_detections(detections)
+
+        for xyxy, score, cls, track_id in zip(
+            tracked.xyxy, tracked.confidence, tracked.class_id, tracked.tracker_id
+        ):
             detections_payload.append({
-                "box": [float(x) for x in box],
+                "box": [float(x) for x in xyxy],
                 "score": float(score),
                 "class_id": int(cls),
+                "track_id": int(track_id),
             })
     t5 = time.perf_counter()
 
@@ -177,6 +194,7 @@ def process_frame(frame_bytes: bytes) -> tuple[dict | None, dict]:
         "t_prep": (t2 - t1) * 1000.0,
         "t_inf": (t3 - t2) * 1000.0,
         "t_post": (t4 - t3) * 1000.0,
+        "t_track": (t5 - t4) * 1000.0,
         "t_total": (t5 - t0) * 1000.0,
     }
 
@@ -200,12 +218,17 @@ async def get_index():
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    # Reset tracking state for new client connection
+    session_tracker = ByteTrack(
+        track_activation_threshold=0.35, lost_track_buffer=30, frame_rate=60
+    )
 
     frame_count = 0
     t_decode_list = []
     t_prep_list = []
     t_inf_list = []
     t_post_list = []
+    t_track_list = []
     t_total_list = []
 
     try:
@@ -215,7 +238,7 @@ async def websocket_endpoint(websocket: WebSocket):
             if not frame_bytes:
                 continue
 
-            response, metrics = await asyncio.to_thread(process_frame, frame_bytes)
+            response, metrics = await asyncio.to_thread(process_frame, frame_bytes, session_tracker)
             if response is None:
                 continue
 
@@ -224,6 +247,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 t_prep_list.append(metrics["t_prep"])
                 t_inf_list.append(metrics["t_inf"])
                 t_post_list.append(metrics["t_post"])
+                t_track_list.append(metrics["t_track"])
                 t_total_list.append(metrics["t_total"])
                 frame_count += 1
 
@@ -234,6 +258,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         f"Prep: {np.mean(t_prep_list[-n:]):.2f}ms | "
                         f"Inf: {np.mean(t_inf_list[-n:]):.2f}ms | "
                         f"Post: {np.mean(t_post_list[-n:]):.2f}ms | "
+                        f"Track: {np.mean(t_track_list[-n:]):.2f}ms | "
                         f"Total: {np.mean(t_total_list[-n:]):.2f}ms ({1000.0 / np.mean(t_total_list[-n:]):.1f} FPS)"
                     )
 

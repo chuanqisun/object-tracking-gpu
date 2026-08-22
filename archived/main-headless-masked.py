@@ -12,6 +12,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from supervision import ByteTrack, Detections
 
+# -masked: includes mask handling, which is discarded by frontend
+
 # ==============================================================================
 # Model Configuration
 # ==============================================================================
