@@ -20,7 +20,7 @@ NUM_CLASSES = 2  # Set to 80 for standard COCO or your custom class count
 INPUT_SIZE = 640
 CONF_THRESH = 0.40
 IOU_THRESH = 0.40  # NMS IoU Threshold
-EXIT_ON_LOADED = True  # Once the model is loaded, exit the script rather than serve it
+EXIT_ON_LOADED = False  # Once the model is loaded, exit the script rather than serve it
 
 # MODEL_PATH = "models/puck-eye-seg-s-nms.onnx" # nms=True, end2end=False
 # MODEL_PATH = "models/puck-eye-seg-s.onnx" # nms=False, end2end=False
