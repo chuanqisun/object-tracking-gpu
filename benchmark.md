@@ -33,3 +33,5 @@ Decode: 1.02ms | Prep: 0.61ms | Inf: 9.93ms | Post: 0.08ms | Track: 0.00ms | Tot
 Decode: 0.85ms | Prep: 0.61ms | Inf: 9.98ms | Post: 0.08ms | Track: 0.00ms | Total: 11.52ms (86.8 FPS)
 Decode: 0.91ms | Prep: 0.62ms | Inf: 10.19ms | Post: 0.08ms | Track: 0.00ms | Total: 11.80ms (84.8 FPS)
 ```
+
+# nms=False end2end=True exhaustive fp16 MLIR=1
