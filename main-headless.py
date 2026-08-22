@@ -28,7 +28,7 @@ MODEL_PATH = "models/puck-eye-seg-s-e2e.onnx" # nms=False, end2end=True
 
 # 1. Target AMD Radeon 890M (RDNA 3.5 / gfx1150)
 os.environ["ROCM_PATH"] = "/opt/rocm"
-os.environ["MIGRAPHX_ENABLE_MLIR"] = "0"
+# os.environ["MIGRAPHX_ENABLE_MLIR"] = "0"
 
 # 2. MIGraphX Cache Configuration
 cache_dir = "models/migraphx_cache"
