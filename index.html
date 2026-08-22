@@ -256,10 +256,12 @@
 
         <fieldset>
           <legend>Metrics</legend>
-          <div class="metrics-grid">
-            <div class="metric-box"><span class="metric-label">FPS</span><span class="metric-val" id="fpsStat">0.0</span></div>
+          <div class="metrics-grid" style="grid-template-columns: repeat(3, 1fr)">
+            <div class="metric-box"><span class="metric-label">CAM FPS</span><span class="metric-val" id="camFpsStat">0.0</span></div>
+            <div class="metric-box"><span class="metric-label">INF FPS</span><span class="metric-val" id="fpsStat">0.0</span></div>
             <div class="metric-box"><span class="metric-label">INFER</span><span class="metric-val" id="inferStat">0ms</span></div>
             <div class="metric-box"><span class="metric-label">RTT</span><span class="metric-val" id="rttStat">0ms</span></div>
+            <div class="metric-box"><span class="metric-label">SKIPPED</span><span class="metric-val" id="skipStat">0</span></div>
             <div class="metric-box"><span class="metric-label">COUNT</span><span class="metric-val" id="detCountStat">0</span></div>
           </div>
         </fieldset>
@@ -324,9 +326,11 @@
         confThres: $("confThres"),
         confValue: $("confValue"),
         status: $("statusIndicator"),
+        camFps: $("camFpsStat"),
         fps: $("fpsStat"),
         infer: $("inferStat"),
         rtt: $("rttStat"),
+        skip: $("skipStat"),
         detCount: $("detCountStat"),
         detectionsList: $("detectionsList"),
         logPanel: $("logPanel"),
@@ -346,6 +350,10 @@
       let isEncoding = false; // toBlob in progress
       let frameCount = 0;
       let fpsWindowStart = performance.now();
+
+      let camFrameCount = 0;
+      let camFpsWindowStart = performance.now();
+      let clientSkipCount = 0;
 
       // ---------- Connection ----------
       function connectWebSocket() {
@@ -461,12 +469,10 @@
       }
 
       // ---------- Streaming Loop (camera-driven, pipelined) ----------
-      // Fires once per NEW camera frame (up to camera FPS). We push frames without
-      // waiting for responses; a small in-flight window + bufferedAmount check
-      // prevents queue bloat. The backend discards stale frames itself.
       function startCaptureLoop() {
         const onFrame = () => {
           if (!isStreaming) return;
+          updateCamFps();
           trySendFrame();
           scheduleNext();
         };
@@ -481,23 +487,31 @@
         scheduleNext();
       }
 
+      function updateCamFps() {
+        camFrameCount++;
+        const now = performance.now();
+        if (now - camFpsWindowStart >= 1000) {
+          el.camFps.textContent = ((camFrameCount * 1000) / (now - camFpsWindowStart)).toFixed(1);
+          camFrameCount = 0;
+          camFpsWindowStart = now;
+        }
+      }
+
       function trySendFrame() {
-        if (
-          !isStreaming ||
-          isEncoding ||
-          ws?.readyState !== WebSocket.OPEN ||
-          inFlight >= MAX_IN_FLIGHT ||
-          ws.bufferedAmount > MAX_BUFFERED_BYTES ||
-          el.video.readyState < 2
-        )
+        if (!isStreaming || ws?.readyState !== WebSocket.OPEN || el.video.readyState < 2) return;
+
+        if (isEncoding || inFlight >= MAX_IN_FLIGHT || ws.bufferedAmount > MAX_BUFFERED_BYTES) {
+          clientSkipCount++;
+          el.skip.textContent = clientSkipCount;
           return;
+        }
 
         isEncoding = true;
         offscreenCtx.drawImage(el.video, 0, 0, TARGET_SIZE, TARGET_SIZE);
         offscreen.toBlob(
           (blob) => {
             isEncoding = false;
-            if (!blob || ws?.readyState !== WebSocket.OPEN) return;
+            if (!blob || ws?.readyState !== WebSocket.OPEN || !isStreaming) return;
 
             // Prefix an 8-byte float64 timestamp header (echoed by server for RTT)
             const header = new ArrayBuffer(8);
@@ -515,12 +529,18 @@
         el.infer.textContent = `${(data.infer_ms || 0).toFixed(1)}ms`;
         el.rtt.textContent = `${rtt}ms`;
 
+        const totalSkipped = clientSkipCount + (data.dropped_total || 0);
+        el.skip.textContent = totalSkipped;
+
         const confThres = parseFloat(el.confThres.value);
         const detections = (data.detections || []).filter((d) => d.score >= confThres);
         el.detCount.textContent = detections.length;
 
-        el.canvas.width = el.video.videoWidth || TARGET_SIZE;
-        el.canvas.height = el.video.videoHeight || TARGET_SIZE;
+        const targetW = el.video.videoWidth || TARGET_SIZE;
+        const targetH = el.video.videoHeight || TARGET_SIZE;
+        if (el.canvas.width !== targetW) el.canvas.width = targetW;
+        if (el.canvas.height !== targetH) el.canvas.height = targetH;
+
         ctx.drawImage(el.video, 0, 0, el.canvas.width, el.canvas.height);
 
         const scaleX = el.canvas.width / (data.target_size || TARGET_SIZE);

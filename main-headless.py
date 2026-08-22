@@ -4,6 +4,7 @@ import os
 import struct
 import sys
 import time
+from collections import deque
 from pathlib import Path
 
 import cv2
@@ -250,12 +251,13 @@ async def websocket_endpoint(websocket: WebSocket):
     async def worker():
         """Pull newest frame, run inference in a thread, send result."""
         frame_count = 0
-        t_decode_list = []
-        t_prep_list = []
-        t_inf_list = []
-        t_post_list = []
-        t_total_list = []
+        t_decode_list = deque(maxlen=30)
+        t_prep_list = deque(maxlen=30)
+        t_inf_list = deque(maxlen=30)
+        t_post_list = deque(maxlen=30)
+        t_total_list = deque(maxlen=30)
         last_dropped = 0
+        window_start_time = time.perf_counter()
 
         while True:
             frame_bytes = await mailbox.get()
@@ -283,16 +285,21 @@ async def websocket_endpoint(websocket: WebSocket):
                 frame_count += 1
 
                 if frame_count % 30 == 0:
-                    n = 30
+                    now = time.perf_counter()
+                    elapsed_wall = now - window_start_time
+                    window_start_time = now
+                    actual_fps = 30.0 / elapsed_wall if elapsed_wall > 0 else 0.0
+                    capacity_fps = 1000.0 / np.mean(t_total_list) if len(t_total_list) > 0 else 0.0
                     dropped_delta = mailbox.dropped - last_dropped
                     last_dropped = mailbox.dropped
                     print(
-                        f"[Telemetry last 30 frames] Decode: {np.mean(t_decode_list[-n:]):.2f}ms | "
-                        f"Prep: {np.mean(t_prep_list[-n:]):.2f}ms | "
-                        f"Inf: {np.mean(t_inf_list[-n:]):.2f}ms | "
-                        f"Post: {np.mean(t_post_list[-n:]):.2f}ms | "
-                        f"Total: {np.mean(t_total_list[-n:]):.2f}ms "
-                        f"({1000.0 / np.mean(t_total_list[-n:]):.1f} FPS) | "
+                        f"[Telemetry last 30 frames] Actual: {actual_fps:.1f} FPS | "
+                        f"Cap: {capacity_fps:.1f} FPS | "
+                        f"Decode: {np.mean(t_decode_list):.2f}ms | "
+                        f"Prep: {np.mean(t_prep_list):.2f}ms | "
+                        f"Inf: {np.mean(t_inf_list):.2f}ms | "
+                        f"Post: {np.mean(t_post_list):.2f}ms | "
+                        f"Total: {np.mean(t_total_list):.2f}ms | "
                         f"Stale dropped: {dropped_delta}"
                     )
 
