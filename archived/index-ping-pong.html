@@ -303,11 +303,6 @@
       const TARGET_SIZE = 640;
       const JPEG_QUALITY = 0.75;
       const DEFAULT_PORT = "18888";
-      // Pipelining: allow up to N frames in flight (overlap network + GPU).
-      // Backend keeps only the newest frame, so extra frames are cheaply discarded.
-      const MAX_IN_FLIGHT = 2;
-      // Backpressure: don't enqueue if the socket send buffer is congested.
-      const MAX_BUFFERED_BYTES = 256 * 1024;
 
       const CLASS_NAMES = { 0: "blue puck", 1: "pink puck" };
       const CLASS_COLORS = { 0: "#0066ff", 1: "#ff007f" };
@@ -336,14 +331,14 @@
 
       const ctx = el.canvas.getContext("2d");
       const offscreen = Object.assign(document.createElement("canvas"), { width: TARGET_SIZE, height: TARGET_SIZE });
-      const offscreenCtx = offscreen.getContext("2d", { willReadFrequently: false });
+      const offscreenCtx = offscreen.getContext("2d");
 
       // ---------- State ----------
       let ws = null;
       let mediaStream = null;
       let isStreaming = false;
-      let inFlight = 0; // pipelined frames awaiting a response
-      let isEncoding = false; // toBlob in progress
+      let isFrameInFlight = false;
+      let frameSentTime = 0;
       let frameCount = 0;
       let fpsWindowStart = performance.now();
 
@@ -364,7 +359,7 @@
             setStatus("connected");
             log("Connected.");
             el.disconnectBtn.disabled = false;
-            inFlight = 0;
+            if (isStreaming) sendNextFrame();
           };
 
           ws.onclose = ({ code }) => {
@@ -373,7 +368,7 @@
             el.connectBtn.disabled = false;
             el.disconnectBtn.disabled = true;
             ws = null;
-            inFlight = 0;
+            isFrameInFlight = false;
           };
 
           ws.onerror = () => {
@@ -382,16 +377,16 @@
           };
 
           ws.onmessage = ({ data }) => {
-            inFlight = Math.max(0, inFlight - 1);
+            const rtt = Math.round(performance.now() - frameSentTime);
+            isFrameInFlight = false;
 
             try {
-              const parsed = JSON.parse(data);
-              // Server echoes our send timestamp -> true per-frame RTT despite pipelining
-              const rtt = parsed.client_ts ? Math.round(performance.now() - parsed.client_ts) : 0;
-              handleInferenceResult(parsed, rtt);
+              handleInferenceResult(JSON.parse(data), rtt);
             } catch (e) {
               log(`Parse err: ${e.message}`);
             }
+
+            if (isStreaming) sendNextFrame();
           };
         } catch (e) {
           log(`Init error: ${e.message}`);
@@ -444,7 +439,8 @@
           isStreaming = true;
           setCameraControls(true);
           log("Camera started.");
-          startCaptureLoop();
+
+          if (ws?.readyState === WebSocket.OPEN) sendNextFrame();
         } catch (err) {
           log(`Camera error: ${err.message}`);
         }
@@ -460,50 +456,19 @@
         drawNoSignal();
       }
 
-      // ---------- Streaming Loop (camera-driven, pipelined) ----------
-      // Fires once per NEW camera frame (up to camera FPS). We push frames without
-      // waiting for responses; a small in-flight window + bufferedAmount check
-      // prevents queue bloat. The backend discards stale frames itself.
-      function startCaptureLoop() {
-        const onFrame = () => {
-          if (!isStreaming) return;
-          trySendFrame();
-          scheduleNext();
-        };
-        const scheduleNext = () => {
-          if (!isStreaming) return;
-          if (el.video.requestVideoFrameCallback) {
-            el.video.requestVideoFrameCallback(onFrame);
-          } else {
-            requestAnimationFrame(onFrame);
-          }
-        };
-        scheduleNext();
-      }
+      // ---------- Streaming Loop ----------
+      function sendNextFrame() {
+        if (!isStreaming || ws?.readyState !== WebSocket.OPEN || isFrameInFlight) return;
+        if (el.video.readyState < 2) return setTimeout(sendNextFrame, 10);
 
-      function trySendFrame() {
-        if (
-          !isStreaming ||
-          isEncoding ||
-          ws?.readyState !== WebSocket.OPEN ||
-          inFlight >= MAX_IN_FLIGHT ||
-          ws.bufferedAmount > MAX_BUFFERED_BYTES ||
-          el.video.readyState < 2
-        )
-          return;
+        isFrameInFlight = true;
+        frameSentTime = performance.now();
 
-        isEncoding = true;
         offscreenCtx.drawImage(el.video, 0, 0, TARGET_SIZE, TARGET_SIZE);
         offscreen.toBlob(
           (blob) => {
-            isEncoding = false;
-            if (!blob || ws?.readyState !== WebSocket.OPEN) return;
-
-            // Prefix an 8-byte float64 timestamp header (echoed by server for RTT)
-            const header = new ArrayBuffer(8);
-            new DataView(header).setFloat64(0, performance.now(), true);
-            inFlight++;
-            ws.send(new Blob([header, blob]));
+            if (!blob || ws?.readyState !== WebSocket.OPEN) return (isFrameInFlight = false);
+            ws.send(blob);
           },
           "image/jpeg",
           JPEG_QUALITY,

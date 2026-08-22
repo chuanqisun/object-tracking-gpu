@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-import struct
 import sys
 import time
 from pathlib import Path
@@ -13,6 +12,8 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 
+# -ping-pong: lock step with frontend. Limited throughput.
+
 # ==============================================================================
 # Model Configuration
 # ==============================================================================
@@ -20,12 +21,12 @@ NUM_CLASSES = 2  # Set to 80 for standard COCO or your custom class count
 INPUT_SIZE = 640
 CONF_THRESH = 0.40
 IOU_THRESH = 0.40  # NMS IoU Threshold
-EXIT_ON_LOADED = False  # Once the model is loaded, exit the script rather than serve it
+EXIT_ON_LOADED = False # Once the model is loaded, exit the script rather than serve it
 
 # MODEL_PATH = "models/puck-eye-seg-s-nms.onnx" # nms=True, end2end=False
 # MODEL_PATH = "models/puck-eye-seg-s.onnx" # nms=False, end2end=False
 # MODEL_PATH = "models/puck-eye-seg-s-e2e-det10.onnx" # nms=False, end2end=True, det10=True
-MODEL_PATH = "models/puck-eye-seg-s-e2e.onnx"  # nms=False, end2end=True
+MODEL_PATH = "models/puck-eye-seg-s-e2e.onnx" # nms=False, end2end=True
 # MODEL_PATH = "models/puck-eye-seg-s-e2e-tuned.onnx" # nms=False, end2end=True, exhaustive tuning
 # ==============================================================================
 
@@ -71,10 +72,6 @@ print(f"Model loaded and warmed up successfully: {MODEL_PATH}")
 if EXIT_ON_LOADED:
     print("EXIT_ON_LOADED is True. Exiting script after model load.")
     sys.exit(0)
-
-# 8-byte little-endian float64 client timestamp prefixed to each binary frame
-HEADER_FMT = "<d"
-HEADER_SIZE = struct.calcsize(HEADER_FMT)
 
 
 def letterbox(img, new_shape=(640, 640), color=(114, 114, 114)):
@@ -150,7 +147,7 @@ def postprocess(
 def process_frame(frame_bytes: bytes) -> tuple[dict | None, dict]:
     t0 = time.perf_counter()
 
-    # Decode image from binary buffer (cv2 releases the GIL here)
+    # Decode image from binary buffer
     np_arr = np.frombuffer(frame_bytes, np.uint8)
     frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
     t1 = time.perf_counter()
@@ -166,7 +163,7 @@ def process_frame(frame_bytes: bytes) -> tuple[dict | None, dict]:
     )
     t2 = time.perf_counter()
 
-    # iGPU Inference (ORT releases the GIL here)
+    # iGPU Inference
     outputs = session.run(None, {input_name: blob})
     t3 = time.perf_counter()
 
@@ -214,66 +211,27 @@ async def get_index():
     return FileResponse(Path(__file__).parent / "index.html")
 
 
-class LatestFrameMailbox:
-    """One-slot mailbox: newest frame wins, stale frames are discarded."""
-
-    def __init__(self):
-        self._frame: bytes | None = None
-        self._event = asyncio.Event()
-        self.dropped = 0
-
-    def put(self, frame: bytes):
-        if self._frame is not None:
-            self.dropped += 1  # overwrote an unprocessed (stale) frame
-        self._frame = frame
-        self._event.set()
-
-    async def get(self) -> bytes:
-        await self._event.wait()
-        self._event.clear()
-        frame, self._frame = self._frame, None
-        return frame
-
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
 
-    mailbox = LatestFrameMailbox()
+    frame_count = 0
+    t_decode_list = []
+    t_prep_list = []
+    t_inf_list = []
+    t_post_list = []
+    t_total_list = []
 
-    async def receiver():
-        """Drain the socket as fast as possible; never blocks on inference."""
+    try:
         while True:
+            # Receive binary frame payload (JPEG/PNG)
             frame_bytes = await websocket.receive_bytes()
-            if frame_bytes:
-                mailbox.put(frame_bytes)
-
-    async def worker():
-        """Pull newest frame, run inference in a thread, send result."""
-        frame_count = 0
-        t_decode_list = []
-        t_prep_list = []
-        t_inf_list = []
-        t_post_list = []
-        t_total_list = []
-        last_dropped = 0
-
-        while True:
-            frame_bytes = await mailbox.get()
-
-            # Split client timestamp header from JPEG payload
-            client_ts = None
-            if len(frame_bytes) > HEADER_SIZE:
-                (client_ts,) = struct.unpack(HEADER_FMT, frame_bytes[:HEADER_SIZE])
-                frame_bytes = frame_bytes[HEADER_SIZE:]
+            if not frame_bytes:
+                continue
 
             response, metrics = await asyncio.to_thread(process_frame, frame_bytes)
             if response is None:
                 continue
-
-            if client_ts is not None:
-                response["client_ts"] = client_ts
-            response["dropped_total"] = mailbox.dropped
 
             if metrics:
                 t_decode_list.append(metrics["t_decode"])
@@ -285,35 +243,20 @@ async def websocket_endpoint(websocket: WebSocket):
 
                 if frame_count % 30 == 0:
                     n = 30
-                    dropped_delta = mailbox.dropped - last_dropped
-                    last_dropped = mailbox.dropped
                     print(
                         f"[Telemetry last 30 frames] Decode: {np.mean(t_decode_list[-n:]):.2f}ms | "
                         f"Prep: {np.mean(t_prep_list[-n:]):.2f}ms | "
                         f"Inf: {np.mean(t_inf_list[-n:]):.2f}ms | "
                         f"Post: {np.mean(t_post_list[-n:]):.2f}ms | "
-                        f"Total: {np.mean(t_total_list[-n:]):.2f}ms "
-                        f"({1000.0 / np.mean(t_total_list[-n:]):.1f} FPS) | "
-                        f"Stale dropped: {dropped_delta}"
+                        f"Total: {np.mean(t_total_list[-n:]):.2f}ms ({1000.0 / np.mean(t_total_list[-n:]):.1f} FPS)"
                     )
 
             await websocket.send_text(json.dumps(response))
 
-    recv_task = asyncio.create_task(receiver())
-    work_task = asyncio.create_task(worker())
-
-    try:
-        done, pending = await asyncio.wait(
-            {recv_task, work_task}, return_when=asyncio.FIRST_EXCEPTION
-        )
-        for t in done:
-            exc = t.exception()
-            if exc and not isinstance(exc, WebSocketDisconnect):
-                print(f"WebSocket error: {exc}")
-    finally:
-        recv_task.cancel()
-        work_task.cancel()
-        await asyncio.gather(recv_task, work_task, return_exceptions=True)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"WebSocket error: {e}")
 
 
 def main():
