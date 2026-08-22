@@ -42,8 +42,7 @@ migraphx_options = {
     "device_id": 0,
     "migraphx_fp16_enable": True,
     # Set to True on first compile to find fastest kernel variants on 890M
-    "migraphx_exhaustive_tune": False # Enable for finalized model. This can take hours.
-    # "migraphx_exhaustive_tune": not is_cached,
+    "migraphx_exhaustive_tune": not is_cached,
 }
 
 if is_cached:
