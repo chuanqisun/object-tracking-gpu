@@ -25,8 +25,8 @@ EXIT_ON_LOADED = False  # Once the model is loaded, exit the script rather than 
 # MODEL_PATH = "models/puck-eye-seg-s-nms.onnx" # nms=True, end2end=False
 # MODEL_PATH = "models/puck-eye-seg-s.onnx" # nms=False, end2end=False
 # MODEL_PATH = "models/puck-eye-seg-s-e2e-det10.onnx" # nms=False, end2end=True, det10=True
-MODEL_PATH = "models/puck-eye-seg-s-e2e.onnx"  # nms=False, end2end=True
-# MODEL_PATH = "models/puck-eye-seg-s-e2e-tuned.onnx" # nms=False, end2end=True, exhaustive tuning
+# MODEL_PATH = "models/puck-eye-seg-s-e2e.onnx"  # nms=False, end2end=True
+MODEL_PATH = "models/puck-eye-seg-s-e2e-tuned.onnx" # nms=False, end2end=True, exhaustive tuning
 # ==============================================================================
 
 # 1. Target AMD Radeon 890M (RDNA 3.5 / gfx1150)
@@ -46,8 +46,7 @@ migraphx_options = {
     "device_id": 0,
     "migraphx_fp16_enable": True,
     # Set to True on first compile to find fastest kernel variants on 890M
-    "migraphx_exhaustive_tune": False,
-    # "migraphx_exhaustive_tune": not is_cached,
+    "migraphx_exhaustive_tune": not is_cached,
 }
 
 if is_cached:
