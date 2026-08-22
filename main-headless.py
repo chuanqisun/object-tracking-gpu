@@ -59,7 +59,7 @@ else:
     os.environ["ORT_MIGRAPHX_SAVE_COMPILED_MODEL"] = "1"
     os.environ["ORT_MIGRAPHX_LOAD_COMPILED_MODEL"] = "0"
 
-providers = [("MIGraphXExecutionProvider", migraphx_options)]
+providers = [("MIGraphXExecutionProvider", migraphx_options), ("CPUExecutionProvider", {})]
 session = ort.InferenceSession(MODEL_PATH, providers=providers)
 input_name = session.get_inputs()[0].name
 
