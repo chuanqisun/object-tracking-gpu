@@ -23,13 +23,12 @@ IOU_THRESH = 0.40  # NMS IoU Threshold
 
 # MODEL_PATH = "models/puck-eye-seg-s-nms.onnx" # nms=True, end2end=False
 # MODEL_PATH = "models/puck-eye-seg-s.onnx" # nms=False, end2end=False
-# MODEL_PATH = "models/puck-eye-seg-s-e2e-det10.onnx" # nms=False, end2end=True, det10=True
-MODEL_PATH = "models/puck-eye-seg-s-e2e.onnx" # nms=False, end2end=True
+MODEL_PATH = "models/puck-eye-seg-s-e2e-det10.onnx"  # nms=False, end2end=True, det10=True
+# MODEL_PATH = "models/puck-eye-seg-s-e2e.onnx" # nms=False, end2end=True
 # ==============================================================================
 
 # 1. Target AMD Radeon 890M (RDNA 3.5 / gfx1150)
 os.environ["ROCM_PATH"] = "/opt/rocm"
-# os.environ["MIGRAPHX_ENABLE_MLIR"] = "0"
 
 # 2. MIGraphX Cache Configuration
 cache_dir = "models/migraphx_cache"
@@ -44,7 +43,7 @@ migraphx_options = {
     "device_id": 0,
     "migraphx_fp16_enable": True,
     # Set to True on first compile to find fastest kernel variants on 890M
-    "migraphx_exhaustive_tune": False # Enable for finalized model. This can take hours.
+    "migraphx_exhaustive_tune": False,  # Enable for finalized model. This can take hours.
     # "migraphx_exhaustive_tune": not is_cached,
 }
 
@@ -82,6 +81,38 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114)):
         img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color
     )
     return img, r, (dw, dh)
+
+
+def nms_fast(boxes_xyxy, confidences, class_ids, iou_thresh=IOU_THRESH):
+    """
+    High-performance batched multi-class NMS using cv2.dnn.NMSBoxes (C++ accelerated).
+    Adds coordinate offset per class to avoid cross-class suppression.
+    """
+    if len(boxes_xyxy) == 0:
+        return np.empty(0, dtype=np.int64)
+
+    # Class-aware offset technique to perform batched NMS across all classes in one go
+    max_coord = boxes_xyxy.max() + 1
+    offsets = class_ids[:, None].astype(np.float32) * max_coord
+    boxes_offset = boxes_xyxy + offsets
+
+    # Convert xyxy -> xywh format expected by cv2.dnn.NMSBoxes
+    x = boxes_offset[:, 0]
+    y = boxes_offset[:, 1]
+    w = boxes_offset[:, 2] - boxes_offset[:, 0]
+    h = boxes_offset[:, 3] - boxes_offset[:, 1]
+    boxes_xywh = np.column_stack([x, y, w, h]).tolist()
+
+    indices = cv2.dnn.NMSBoxes(
+        bboxes=boxes_xywh,
+        scores=confidences.tolist(),
+        score_threshold=0.0,
+        nms_threshold=float(iou_thresh),
+    )
+
+    if len(indices) == 0:
+        return np.empty(0, dtype=np.int64)
+    return np.array(indices).flatten()
 
 
 def process_mask_fast(protos, mask_coeffs, bboxes, orig_shape, pad, ratio):
@@ -139,16 +170,23 @@ def process_mask_fast(protos, mask_coeffs, bboxes, orig_shape, pad, ratio):
 
 
 def postprocess(
-    preds, protos, orig_shape, ratio, pad, conf_thresh=CONF_THRESH, iou_thresh=IOU_THRESH, num_classes=NUM_CLASSES
+    preds,
+    protos,
+    orig_shape,
+    ratio,
+    pad,
+    conf_thresh=CONF_THRESH,
+    iou_thresh=IOU_THRESH,
+    num_classes=NUM_CLASSES,
 ):
     p = np.squeeze(preds)
-    if p.shape[0] < p.shape[1]:
-        p = p.T
+    if p.ndim == 1:
+        p = np.expand_dims(p, axis=0)
 
     protos = np.squeeze(protos)
     num_protos = protos.shape[0]
 
-    # YOLO26 exports end-to-end detections as xyxy, confidence, class_id, masks.
+    # YOLO output parsing
     boxes = p[:, :4]
     confidences = p[:, 4]
     class_ids = p[:, 5].astype(np.int32)
@@ -164,22 +202,17 @@ def postprocess(
     if len(boxes) == 0:
         return np.empty((0, 4)), np.empty(0), np.empty(0), np.empty((0, *orig_shape))
 
-    # 2. Batched NMS filtering (using OpenCV's C++ cv2.dnn.NMSBoxesBatched)
-    boxes_wh = boxes.copy()
-    boxes_wh[:, 2] -= boxes_wh[:, 0]
-    boxes_wh[:, 3] -= boxes_wh[:, 1]
-    nms_indices = cv2.dnn.NMSBoxesBatched(boxes_wh, confidences, class_ids, 0.0, iou_thresh)
-
+    # 2. Fast C++ Accelerated NMS Step
+    nms_indices = nms_fast(boxes, confidences, class_ids, iou_thresh=iou_thresh)
     if len(nms_indices) == 0:
         return np.empty((0, 4)), np.empty(0), np.empty(0), np.empty((0, *orig_shape))
 
-    nms_indices = np.array(nms_indices).flatten()
     boxes = boxes[nms_indices]
     confidences = confidences[nms_indices]
     class_ids = class_ids[nms_indices]
     mask_coeffs = mask_coeffs[nms_indices]
 
-    # Undo padding
+    # 3. Undo letterbox padding (boxes are in xyxy format)
     x1 = (boxes[:, 0] - pad[0]) / ratio
     y1 = (boxes[:, 1] - pad[1]) / ratio
     x2 = (boxes[:, 2] - pad[0]) / ratio
@@ -192,7 +225,7 @@ def postprocess(
         np.clip(y2, 0, orig_shape[0]),
     ])
 
-    # Compute segmentation masks only on confidence-surviving boxes.
+    # 4. Compute segmentation masks only for deduplicated detections
     masks = process_mask_fast(protos, mask_coeffs, xyxy, orig_shape, pad, ratio)
 
     return xyxy, confidences, class_ids, masks
@@ -221,9 +254,9 @@ def process_frame(frame_bytes: bytes, session_tracker: ByteTrack) -> tuple[dict 
     outputs = session.run(None, {input_name: blob})
     t3 = time.perf_counter()
 
-    # Postprocessing
+    # Postprocessing with NMS @ 0.40 IoU
     boxes, confs, class_ids, masks = postprocess(
-        outputs[0], outputs[1], orig_shape, ratio, pad, conf_thresh=CONF_THRESH
+        outputs[0], outputs[1], orig_shape, ratio, pad, conf_thresh=CONF_THRESH, iou_thresh=IOU_THRESH
     )
     t4 = time.perf_counter()
 

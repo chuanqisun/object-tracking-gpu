@@ -34,4 +34,24 @@ Decode: 0.85ms | Prep: 0.61ms | Inf: 9.98ms | Post: 0.08ms | Track: 0.00ms | Tot
 Decode: 0.91ms | Prep: 0.62ms | Inf: 10.19ms | Post: 0.08ms | Track: 0.00ms | Total: 11.80ms (84.8 FPS)
 ```
 
+# nms=False end2end=True non-exhaustive fp16 MLIR=1 max_det=10
+
+```txt
+[Telemetry last 30 frames] Decode: 0.83ms | Prep: 0.61ms | Inf: 9.52ms | Post: 0.08ms | Track: 0.00ms | Total: 11.04ms (90.6 FPS)
+[Telemetry last 30 frames] Decode: 0.93ms | Prep: 0.69ms | Inf: 9.25ms | Post: 0.09ms | Track: 0.00ms | Total: 10.95ms (91.3 FPS)
+[Telemetry last 30 frames] Decode: 0.74ms | Prep: 0.58ms | Inf: 9.70ms | Post: 0.08ms | Track: 0.00ms | Total: 11.10ms (90.1 FPS)
+[Telemetry last 30 frames] Decode: 0.81ms | Prep: 0.60ms | Inf: 9.44ms | Post: 0.08ms | Track: 0.00ms | Total: 10.93ms (91.5 FPS)
+[Telemetry last 30 frames] Decode: 0.96ms | Prep: 0.60ms | Inf: 9.58ms | Post: 0.08ms | Track: 0.00ms | Total: 11.21ms (89.2 FPS)
+[Telemetry last 30 frames] Decode: 1.06ms | Prep: 0.65ms | Inf: 9.56ms | Post: 0.08ms | Track: 0.00ms | Total: 11.36ms (88.1 FPS)
+[Telemetry last 30 frames] Decode: 1.13ms | Prep: 0.90ms | Inf: 17.27ms | Post: 1.84ms | Track: 0.88ms | Total: 22.02ms (45.4 FPS)
+[Telemetry last 30 frames] Decode: 1.16ms | Prep: 0.92ms | Inf: 22.91ms | Post: 1.50ms | Track: 1.11ms | Total: 27.59ms (36.2 FPS)
+[Telemetry last 30 frames] Decode: 1.17ms | Prep: 0.87ms | Inf: 22.08ms | Post: 0.91ms | Track: 1.15ms | Total: 26.17ms (38.2 FPS)
+[Telemetry last 30 frames] Decode: 1.12ms | Prep: 0.94ms | Inf: 22.28ms | Post: 1.21ms | Track: 1.11ms | Total: 26.66ms (37.5 FPS)
+[Telemetry last 30 frames] Decode: 1.19ms | Prep: 0.92ms | Inf: 22.62ms | Post: 1.41ms | Track: 0.95ms | Total: 27.09ms (36.9 FPS)
+[Telemetry last 30 frames] Decode: 1.07ms | Prep: 0.57ms | Inf: 9.99ms | Post: 0.07ms | Track: 0.00ms | Total: 11.70ms (85.5 FPS)
+[Telemetry last 30 frames] Decode: 0.77ms | Prep: 0.60ms | Inf: 9.63ms | Post: 0.08ms | Track: 0.00ms | Total: 11.07ms (90.3 FPS)
+[Telemetry last 30 frames] Decode: 0.92ms | Prep: 0.64ms | Inf: 10.48ms | Post: 0.09ms | Track: 0.00ms | Total: 12.13ms (82.4 FPS)
+[Telemetry last 30 frames] Decode: 0.90ms | Prep: 0.67ms | Inf: 10.07ms | Post: 0.09ms | Track: 0.00ms | Total: 11.72ms (85.3 FPS)
+```
+
 # nms=False end2end=True exhaustive fp16 MLIR=1
