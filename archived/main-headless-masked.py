@@ -16,6 +16,7 @@ from supervision import ByteTrack, Detections
 # Model Configuration
 # ==============================================================================
 NUM_CLASSES = 2  # Set to 80 for standard COCO or your custom class count
+NUM_MASK_COEFFS = 32  # Standard YOLO prototype mask coefficients
 INPUT_SIZE = 640
 CONF_THRESH = 0.40
 IOU_THRESH = 0.40  # NMS IoU Threshold
@@ -83,28 +84,85 @@ def letterbox(img, new_shape=(640, 640), color=(114, 114, 114)):
     return img, r, (dw, dh)
 
 
+def process_mask_fast(protos, mask_coeffs, bboxes, orig_shape, pad, ratio):
+    """
+    Optimized mask processing:
+    Computes masks directly on letterboxed prototype dimensions and maps to orig_shape.
+    """
+    c, mh, mw = protos.shape
+    # Matrix multiply: (N, 32) @ (32, mh * mw) -> (N, mh, mw)
+    masks = np.matmul(mask_coeffs, protos.reshape(c, -1))
+    # In-place sigmoid
+    masks = 1 / (1 + np.exp(-masks))
+    masks = masks.reshape(-1, mh, mw)
+
+    scaled_masks = []
+    pad_w, pad_h = pad
+    for i, box in enumerate(bboxes):
+        mask = masks[i]
+
+        # Calculate bounding box coordinates on prototype mask resolution (160x160)
+        # 1. Map orig_shape box back to letterboxed 640x640 space
+        x1_pad = box[0] * ratio + pad_w
+        y1_pad = box[1] * ratio + pad_h
+        x2_pad = box[2] * ratio + pad_w
+        y2_pad = box[3] * ratio + pad_h
+
+        # 2. Scale 640x640 space down to prototype space (mh, mw)
+        scale_x = mw / INPUT_SIZE
+        scale_y = mh / INPUT_SIZE
+        mx1 = max(0, int(x1_pad * scale_x))
+        my1 = max(0, int(y1_pad * scale_y))
+        mx2 = min(mw, int(x2_pad * scale_x))
+        my2 = min(mh, int(y2_pad * scale_y))
+
+        # Crop outside of box
+        cropped_mask = np.zeros_like(mask)
+        cropped_mask[my1:my2, mx1:mx2] = mask[my1:my2, mx1:mx2]
+
+        # Un-pad and resize only to original shape
+        unpad_h = int(round(orig_shape[0] * ratio * scale_y))
+        unpad_w = int(round(orig_shape[1] * ratio * scale_x))
+        pad_top = int(round(pad_h * scale_y))
+        pad_left = int(round(pad_w * scale_x))
+
+        mask_unpad = cropped_mask[pad_top : pad_top + unpad_h, pad_left : pad_left + unpad_w]
+        if mask_unpad.size == 0:
+            full_mask = np.zeros(orig_shape, dtype=bool)
+        else:
+            full_mask = cv2.resize(
+                mask_unpad, (orig_shape[1], orig_shape[0]), interpolation=cv2.INTER_LINEAR
+            ) > 0.5
+        scaled_masks.append(full_mask)
+
+    return np.array(scaled_masks) if len(scaled_masks) > 0 else np.empty((0, *orig_shape), dtype=bool)
+
+
 def postprocess(
-    preds, orig_shape, ratio, pad, conf_thresh=CONF_THRESH, iou_thresh=IOU_THRESH, num_classes=NUM_CLASSES
+    preds, protos, orig_shape, ratio, pad, conf_thresh=CONF_THRESH, iou_thresh=IOU_THRESH, num_classes=NUM_CLASSES
 ):
     p = np.squeeze(preds)
-    if p.ndim == 1:
-        p = np.expand_dims(p, axis=0)
-    elif p.shape[0] < p.shape[1] and p.shape[1] > 100:
+    if p.shape[0] < p.shape[1]:
         p = p.T
 
-    # YOLO26 exports end-to-end detections as xyxy, confidence, class_id, mask_coeffs.
+    protos = np.squeeze(protos)
+    num_protos = protos.shape[0]
+
+    # YOLO26 exports end-to-end detections as xyxy, confidence, class_id, masks.
     boxes = p[:, :4]
     confidences = p[:, 4]
     class_ids = p[:, 5].astype(np.int32)
+    mask_coeffs = p[:, 6 : 6 + num_protos]
 
     # 1. Confidence filtering
     keep = confidences > conf_thresh
     boxes = boxes[keep]
     confidences = confidences[keep]
     class_ids = class_ids[keep]
+    mask_coeffs = mask_coeffs[keep]
 
     if len(boxes) == 0:
-        return np.empty((0, 4)), np.empty(0), np.empty(0)
+        return np.empty((0, 4)), np.empty(0), np.empty(0), np.empty((0, *orig_shape))
 
     # 2. Batched NMS filtering (using OpenCV's C++ cv2.dnn.NMSBoxesBatched)
     boxes_wh = boxes.copy()
@@ -113,12 +171,13 @@ def postprocess(
     nms_indices = cv2.dnn.NMSBoxesBatched(boxes_wh, confidences, class_ids, 0.0, iou_thresh)
 
     if len(nms_indices) == 0:
-        return np.empty((0, 4)), np.empty(0), np.empty(0)
+        return np.empty((0, 4)), np.empty(0), np.empty(0), np.empty((0, *orig_shape))
 
     nms_indices = np.array(nms_indices).flatten()
     boxes = boxes[nms_indices]
     confidences = confidences[nms_indices]
     class_ids = class_ids[nms_indices]
+    mask_coeffs = mask_coeffs[nms_indices]
 
     # Undo padding
     x1 = (boxes[:, 0] - pad[0]) / ratio
@@ -133,7 +192,10 @@ def postprocess(
         np.clip(y2, 0, orig_shape[0]),
     ])
 
-    return xyxy, confidences, class_ids
+    # Compute segmentation masks only on confidence-surviving boxes.
+    masks = process_mask_fast(protos, mask_coeffs, xyxy, orig_shape, pad, ratio)
+
+    return xyxy, confidences, class_ids, masks
 
 
 def process_frame(frame_bytes: bytes, session_tracker: ByteTrack) -> tuple[dict | None, dict]:
@@ -160,8 +222,8 @@ def process_frame(frame_bytes: bytes, session_tracker: ByteTrack) -> tuple[dict 
     t3 = time.perf_counter()
 
     # Postprocessing
-    boxes, confs, class_ids = postprocess(
-        outputs[0], orig_shape, ratio, pad, conf_thresh=CONF_THRESH
+    boxes, confs, class_ids, masks = postprocess(
+        outputs[0], outputs[1], orig_shape, ratio, pad, conf_thresh=CONF_THRESH
     )
     t4 = time.perf_counter()
 
@@ -172,6 +234,7 @@ def process_frame(frame_bytes: bytes, session_tracker: ByteTrack) -> tuple[dict 
             xyxy=boxes,
             confidence=confs,
             class_id=class_ids,
+            mask=masks if len(masks) > 0 else None,
         )
 
         tracked = session_tracker.update_with_detections(detections)
