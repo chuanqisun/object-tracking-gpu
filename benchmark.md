@@ -57,5 +57,18 @@ Decode: 0.91ms | Prep: 0.62ms | Inf: 10.19ms | Post: 0.08ms | Track: 0.00ms | To
 # nms=False end2end=True non-exhaustive fp16 MLIR=1 removed tracker and mask handling
 
 ```txt
-
+[Telemetry last 30 frames] Decode: 0.75ms | Prep: 0.59ms | Inf: 10.38ms | Post: 0.17ms | Total: 11.90ms (84.0 FPS)
+[Telemetry last 30 frames] Decode: 0.76ms | Prep: 0.57ms | Inf: 10.16ms | Post: 0.17ms | Total: 11.68ms (85.6 FPS)
+[Telemetry last 30 frames] Decode: 0.81ms | Prep: 0.57ms | Inf: 9.87ms | Post: 0.18ms | Total: 11.45ms (87.4 FPS)
+[Telemetry last 30 frames] Decode: 0.78ms | Prep: 0.58ms | Inf: 9.97ms | Post: 0.08ms | Total: 11.40ms (87.7 FPS)
+[Telemetry last 30 frames] Decode: 0.78ms | Prep: 0.57ms | Inf: 10.05ms | Post: 0.17ms | Total: 11.58ms (86.3 FPS)
+[Telemetry last 30 frames] Decode: 0.89ms | Prep: 0.56ms | Inf: 10.03ms | Post: 0.17ms | Total: 11.66ms (85.8 FPS)
+[Telemetry last 30 frames] Decode: 0.88ms | Prep: 0.58ms | Inf: 9.86ms | Post: 0.18ms | Total: 11.51ms (86.9 FPS)
+[Telemetry last 30 frames] Decode: 0.75ms | Prep: 0.58ms | Inf: 10.21ms | Post: 0.18ms | Total: 11.74ms (85.2 FPS)
+[Telemetry last 30 frames] Decode: 0.80ms | Prep: 0.58ms | Inf: 10.11ms | Post: 0.17ms | Total: 11.68ms (85.6 FPS)
+[Telemetry last 30 frames] Decode: 1.07ms | Prep: 0.58ms | Inf: 9.78ms | Post: 0.14ms | Total: 11.58ms (86.3 FPS)
+[Telemetry last 30 frames] Decode: 0.89ms | Prep: 0.62ms | Inf: 9.90ms | Post: 0.13ms | Total: 11.54ms (86.6 FPS)
+[Telemetry last 30 frames] Decode: 0.76ms | Prep: 0.57ms | Inf: 9.84ms | Post: 0.08ms | Total: 11.24ms (88.9 FPS)
+[Telemetry last 30 frames] Decode: 0.89ms | Prep: 0.60ms | Inf: 9.85ms | Post: 0.09ms | Total: 11.44ms (87.4 FPS)
+[Telemetry last 30 frames] Decode: 0.90ms | Prep: 0.66ms | Inf: 9.71ms | Post: 0.09ms | Total: 11.35ms (88.1 FPS)
 ```
