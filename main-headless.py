@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -18,6 +19,7 @@ NUM_CLASSES = 2  # Set to 80 for standard COCO or your custom class count
 INPUT_SIZE = 640
 CONF_THRESH = 0.40
 IOU_THRESH = 0.40  # NMS IoU Threshold
+EXIT_ON_LOADED = True # Once the model is loaded, exit the script rather than serve it
 
 # MODEL_PATH = "models/puck-eye-seg-s-nms.onnx" # nms=True, end2end=False
 # MODEL_PATH = "models/puck-eye-seg-s.onnx" # nms=False, end2end=False
@@ -57,6 +59,15 @@ else:
 providers = [("MIGraphXExecutionProvider", migraphx_options)]
 session = ort.InferenceSession(MODEL_PATH, providers=providers)
 input_name = session.get_inputs()[0].name
+
+# Perform warmup inference pass to ensure the model is fully compiled, cached, and initialized
+dummy_input = np.zeros((1, 3, INPUT_SIZE, INPUT_SIZE), dtype=np.float32)
+session.run(None, {input_name: dummy_input})
+print(f"Model loaded and warmed up successfully: {MODEL_PATH}")
+
+if EXIT_ON_LOADED:
+    print("EXIT_ON_LOADED is True. Exiting script after model load.")
+    sys.exit(0)
 
 
 def letterbox(img, new_shape=(640, 640), color=(114, 114, 114)):

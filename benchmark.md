@@ -54,4 +54,8 @@ Decode: 0.91ms | Prep: 0.62ms | Inf: 10.19ms | Post: 0.08ms | Track: 0.00ms | To
 [Telemetry last 30 frames] Decode: 0.90ms | Prep: 0.67ms | Inf: 10.07ms | Post: 0.09ms | Track: 0.00ms | Total: 11.72ms (85.3 FPS)
 ```
 
-# nms=False end2end=True exhaustive fp16 MLIR=1
+# nms=False end2end=True non-exhaustive fp16 MLIR=1 removed tracker and mask handling
+
+```txt
+
+```
