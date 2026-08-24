@@ -8,5 +8,5 @@ source .venv/bin/activate
 uv run python main.py
 
 # Start frontend
-npx serve
+npx serve web
 ```
