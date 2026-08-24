@@ -43,11 +43,20 @@ cache_dir_abs = os.path.abspath(cache_dir)
 os.environ["ORT_MIGRAPHX_MODEL_CACHE_PATH"] = cache_dir_abs
 os.environ["ORT_MIGRAPHX_CACHE_PATH"] = cache_dir_abs
 
+# For AMD Ryzen AI Laptops
 migraphx_options = {
     "device_id": 0,
     "migraphx_fp16_enable": True,
     # Set to True on first compile to find fastest kernel variants on 890M
     "migraphx_exhaustive_tune": not is_cached,
+}
+
+# For Apple Silicon
+coreml_options = {
+    # 0 = CPU only, 1 = CPU and GPU, 2 = CPU, GPU, and Apple Neural Engine (ANE)
+    "coreml_specialization_strategy": "Default",
+    "model_format": "MLProgram",          # Modern format for macOS 13+ (enables FP16/ANE optimizations)
+    "require_user_neural_engine": False,  # Allow fallback to GPU if ANE isn't supported for specific ops
 }
 
 if is_cached:
@@ -59,7 +68,7 @@ else:
     os.environ["ORT_MIGRAPHX_SAVE_COMPILED_MODEL"] = "1"
     os.environ["ORT_MIGRAPHX_LOAD_COMPILED_MODEL"] = "0"
 
-providers = [("MIGraphXExecutionProvider", migraphx_options), ("CPUExecutionProvider", {})]
+providers = [("MIGraphXExecutionProvider", migraphx_options), ("CoreMLExecutionProvider", coreml_options), ("CPUExecutionProvider", {})]
 session = ort.InferenceSession(MODEL_PATH, providers=providers)
 input_name = session.get_inputs()[0].name
 
