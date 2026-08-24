@@ -1,10 +1,34 @@
 import time
 import cv2
 import numpy as np
-from main import INPUT_SIZE, input_name, letterbox, postprocess, session
+import onnxruntime as ort
+from main import (
+    INPUT_SIZE,
+    MODEL_PATH,
+    coreml_options,
+    letterbox,
+    postprocess,
+    session as migraphx_session,
+)
+
+
+def get_test_session():
+    available_providers = ort.get_available_providers()
+    if "CoreMLExecutionProvider" in available_providers:
+        test_session = ort.InferenceSession(
+            MODEL_PATH,
+            providers=[("CoreMLExecutionProvider", coreml_options), "CPUExecutionProvider"],
+        )
+        print("Using CoreMLExecutionProvider for the benchmark")
+    else:
+        test_session = migraphx_session
+        print("CoreMLExecutionProvider unavailable; using the main session")
+
+    return test_session, test_session.get_inputs()[0].name
 
 
 def main():
+    session, input_name = get_test_session()
     image_path = "sample.jpg"
     frame = cv2.imread(image_path)
     if frame is None:
@@ -24,7 +48,7 @@ def main():
             img, scalefactor=1.0 / 255.0, size=(INPUT_SIZE, INPUT_SIZE), swapRB=True, crop=False
         )
         outputs = session.run(None, {input_name: blob})
-        _ = postprocess(outputs[0], outputs[1], orig_shape, ratio, pad)
+        _ = postprocess(outputs[0], orig_shape, ratio, pad)
 
     print(f"Benchmarking {num_runs} iterations (no tracker)...")
 
@@ -54,9 +78,7 @@ def main():
         t2 = time.perf_counter()
 
         # 3. Postprocessing
-        boxes, confs, class_ids, masks = postprocess(
-            outputs[0], outputs[1], orig_shape, ratio, pad
-        )
+        boxes, confs, class_ids = postprocess(outputs[0], orig_shape, ratio, pad)
 
         t3 = time.perf_counter()
 

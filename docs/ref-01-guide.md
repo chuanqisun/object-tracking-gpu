@@ -62,10 +62,17 @@ uv pip install fastapi uvicorn websockets
 
 ### Step 2: Export `yolo26s-seg.pt` to FP16 ONNX
 
-Run the export tool via `uv run` inside your project environment:
+If new models are needed, run the export tool via `uv run` inside your project environment:
 
 ```bash
+# Install yolo CLI
+uv pip install ultralytics
+
+# Export model
 uv run yolo export model=yolo26s-seg.pt format=onnx imgsz=640 half=True simplify=True
+
+# Uninstall yolo CLI or else it will conflict with AMD's runtime
+uv pip uninstall ultralytics
 ```
 
 _This produces `yolo26s-seg.onnx` in your current directory._
