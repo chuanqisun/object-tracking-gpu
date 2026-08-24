@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>YOLO26 Inference Console</title>
+    <title>Unified Tracking Console (MediaPipe + YOLO26)</title>
     <style>
       :root {
         --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -47,7 +47,9 @@
           font-weight: 600;
         }
 
-        .status-indicator {
+        .status-indicators {
+          display: flex;
+          gap: 0.5rem;
           font-family: var(--font-mono);
           font-weight: 600;
           font-size: 11px;
@@ -56,11 +58,11 @@
 
       .layout {
         display: grid;
-        grid-template-columns: 280px minmax(0, 1fr);
+        grid-template-columns: 340px minmax(0, 1fr);
         gap: var(--gap);
         align-items: start;
 
-        @media (max-width: 768px) {
+        @media (max-width: 860px) {
           grid-template-columns: 1fr;
 
           > .viewport-column {
@@ -126,7 +128,7 @@
 
       .metrics-grid {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(3, 1fr);
         gap: 2px;
         font-family: var(--font-mono);
         text-align: center;
@@ -160,7 +162,7 @@
       }
 
       .detections-table-container {
-        max-height: 120px;
+        max-height: 140px;
         overflow-y: auto;
         border: 1px solid var(--border);
 
@@ -216,23 +218,18 @@
   </head>
   <body>
     <header>
-      <h1>YOLO26 Console</h1>
-      <div id="statusIndicator" class="status-indicator">[DISCONNECTED]</div>
+      <h1>Unified Tracking Console</h1>
+      <div class="status-indicators">
+        <span id="mpStatus">[MP: INIT]</span>
+        <span id="yoloStatus">[YOLO: DISCONNECTED]</span>
+      </div>
     </header>
 
     <main class="layout">
       <div class="sidebar">
+        <!-- Camera Control (Shared) -->
         <fieldset>
-          <legend>Server</legend>
-          <input type="text" id="wsUrl" placeholder="ws://localhost:18888/ws" />
-          <div class="row">
-            <button id="connectBtn">Connect</button>
-            <button id="disconnectBtn" disabled>Disconnect</button>
-          </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>Camera</legend>
+          <legend>Camera (Shared Source)</legend>
           <div class="row">
             <select id="cameraSelect">
               <option value="">-- Scan Devices --</option>
@@ -243,52 +240,80 @@
             <button id="startCamBtn" disabled>Start</button>
             <button id="stopCamBtn" disabled>Stop</button>
           </div>
-        </fieldset>
-
-        <fieldset>
-          <legend>Parameters</legend>
-          <label for="confThres">
-            <span>Confidence Threshold</span>
-            <span id="confValue" style="font-family: var(--font-mono)">0.25</span>
-          </label>
-          <input type="range" id="confThres" min="0.05" max="0.95" step="0.05" value="0.25" />
-        </fieldset>
-
-        <fieldset>
-          <legend>Metrics</legend>
-          <div class="metrics-grid" style="grid-template-columns: repeat(3, 1fr)">
-            <div class="metric-box"><span class="metric-label">CAM FPS</span><span class="metric-val" id="camFpsStat">0.0</span></div>
-            <div class="metric-box"><span class="metric-label">INF FPS</span><span class="metric-val" id="fpsStat">0.0</span></div>
-            <div class="metric-box"><span class="metric-label">INFER</span><span class="metric-val" id="inferStat">0ms</span></div>
-            <div class="metric-box"><span class="metric-label">RTT</span><span class="metric-val" id="rttStat">0ms</span></div>
-            <div class="metric-box"><span class="metric-label">SKIPPED</span><span class="metric-val" id="skipStat">0</span></div>
-            <div class="metric-box"><span class="metric-label">COUNT</span><span class="metric-val" id="detCountStat">0</span></div>
+          <div class="metrics-grid" style="grid-template-columns: 1fr; margin-top: 2px">
+            <div class="metric-box">
+              <span class="metric-label">CAMERA FPS</span>
+              <span class="metric-val" id="camFpsStat">0.0</span>
+            </div>
           </div>
         </fieldset>
 
+        <!-- MediaPipe Config & Metrics -->
         <fieldset>
-          <legend>Logs</legend>
-          <div id="logPanel">Ready.</div>
+          <legend>MediaPipe (Index Finger)</legend>
+          <div class="row">
+            <button id="reloadMpBtn">Reload Model</button>
+          </div>
+          <label for="mpConfThres">
+            <span>Confidence Threshold</span>
+            <span id="mpConfValue" style="font-family: var(--font-mono)">0.50</span>
+          </label>
+          <input type="range" id="mpConfThres" min="0.05" max="0.95" step="0.05" value="0.50" />
+
+          <div class="metrics-grid">
+            <div class="metric-box"><span class="metric-label">FPS</span><span class="metric-val" id="mpFps">0.0</span></div>
+            <div class="metric-box"><span class="metric-label">INFER</span><span class="metric-val" id="mpInfer">0ms</span></div>
+            <div class="metric-box"><span class="metric-label">SKIPPED</span><span class="metric-val" id="mpSkip">0</span></div>
+          </div>
         </fieldset>
 
+        <!-- YOLO Config & Metrics -->
         <fieldset>
-          <legend>Detections</legend>
+          <legend>YOLO26 (Pucks via WebSocket)</legend>
+          <input type="text" id="wsUrl" placeholder="ws://localhost:18888/ws" />
+          <div class="row">
+            <button id="connectYoloBtn">Connect</button>
+            <button id="disconnectYoloBtn" disabled>Disconnect</button>
+          </div>
+          <label for="yoloConfThres">
+            <span>Confidence Threshold</span>
+            <span id="yoloConfValue" style="font-family: var(--font-mono)">0.25</span>
+          </label>
+          <input type="range" id="yoloConfThres" min="0.05" max="0.95" step="0.05" value="0.25" />
+
+          <div class="metrics-grid" style="grid-template-columns: repeat(4, 1fr)">
+            <div class="metric-box"><span class="metric-label">FPS</span><span class="metric-val" id="yoloFps">0.0</span></div>
+            <div class="metric-box"><span class="metric-label">INFER</span><span class="metric-val" id="yoloInfer">0ms</span></div>
+            <div class="metric-box"><span class="metric-label">RTT</span><span class="metric-val" id="yoloRtt">0ms</span></div>
+            <div class="metric-box"><span class="metric-label">SKIPPED</span><span class="metric-val" id="yoloSkip">0</span></div>
+          </div>
+        </fieldset>
+
+        <!-- Unified Detection Feed -->
+        <fieldset>
+          <legend>Active Detections</legend>
           <div class="detections-table-container">
             <table>
               <thead>
                 <tr>
-                  <th>Class</th>
+                  <th>Model / Item</th>
                   <th style="text-align: right">Score</th>
-                  <th style="text-align: right">BBox</th>
+                  <th style="text-align: right">Coordinates</th>
                 </tr>
               </thead>
               <tbody id="detectionsList">
                 <tr>
-                  <td colspan="3" style="color: var(--muted)">No active stream</td>
+                  <td colspan="3" style="color: var(--muted)">No active detections</td>
                 </tr>
               </tbody>
             </table>
           </div>
+        </fieldset>
+
+        <!-- System Logs -->
+        <fieldset>
+          <legend>Logs</legend>
+          <div id="logPanel">Ready.</div>
         </fieldset>
       </div>
 
@@ -300,38 +325,60 @@
       </div>
     </main>
 
-    <script>
+    <script type="module">
+      import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
+
       // ---------- Constants ----------
       const TARGET_SIZE = 640;
       const JPEG_QUALITY = 0.75;
       const DEFAULT_PORT = "18888";
-      // Pipelining: allow up to N frames in flight (overlap network + GPU).
-      // Backend keeps only the newest frame, so extra frames are cheaply discarded.
+      const INDEX_FINGER_TIP = 8;
       const MAX_IN_FLIGHT = 2;
-      // Backpressure: don't enqueue if the socket send buffer is congested.
       const MAX_BUFFERED_BYTES = 256 * 1024;
 
-      const CLASS_NAMES = { 0: "blue puck", 1: "pink puck" };
-      const CLASS_COLORS = { 0: "#0066ff", 1: "#ff007f" };
+      const HAND_COLORS = {
+        Left: "#0066ff", // Blue (matches blue puck styling)
+        Right: "#ff007f", // Pink (matches pink puck styling)
+      };
+
+      const YOLO_CLASSES = { 0: "blue puck", 1: "pink puck" };
+      const YOLO_COLORS = { 0: "#0066ff", 1: "#ff007f" };
 
       const $ = (id) => document.getElementById(id);
       const el = {
-        wsUrl: $("wsUrl"),
-        connectBtn: $("connectBtn"),
-        disconnectBtn: $("disconnectBtn"),
+        // Status & Controls
+        mpStatus: $("mpStatus"),
+        yoloStatus: $("yoloStatus"),
         cameraSelect: $("cameraSelect"),
         refreshCamerasBtn: $("refreshCamerasBtn"),
         startCamBtn: $("startCamBtn"),
         stopCamBtn: $("stopCamBtn"),
-        confThres: $("confThres"),
-        confValue: $("confValue"),
-        status: $("statusIndicator"),
+        reloadMpBtn: $("reloadMpBtn"),
+        wsUrl: $("wsUrl"),
+        connectYoloBtn: $("connectYoloBtn"),
+        disconnectYoloBtn: $("disconnectYoloBtn"),
+
+        // Configs
+        mpConfThres: $("mpConfThres"),
+        mpConfValue: $("mpConfValue"),
+        yoloConfThres: $("yoloConfThres"),
+        yoloConfValue: $("yoloConfValue"),
+
+        // Camera Metrics
         camFps: $("camFpsStat"),
-        fps: $("fpsStat"),
-        infer: $("inferStat"),
-        rtt: $("rttStat"),
-        skip: $("skipStat"),
-        detCount: $("detCountStat"),
+
+        // MediaPipe Metrics
+        mpFps: $("mpFps"),
+        mpInfer: $("mpInfer"),
+        mpSkip: $("mpSkip"),
+
+        // YOLO Metrics
+        yoloFps: $("yoloFps"),
+        yoloInfer: $("yoloInfer"),
+        yoloRtt: $("yoloRtt"),
+        yoloSkip: $("yoloSkip"),
+
+        // UI Outputs
         detectionsList: $("detectionsList"),
         logPanel: $("logPanel"),
         video: $("webcam"),
@@ -339,76 +386,375 @@
       };
 
       const ctx = el.canvas.getContext("2d");
+
+      // Shared offscreen canvas for zero-allocation frame grabs
       const offscreen = Object.assign(document.createElement("canvas"), { width: TARGET_SIZE, height: TARGET_SIZE });
       const offscreenCtx = offscreen.getContext("2d", { willReadFrequently: false });
 
       // ---------- State ----------
-      let ws = null;
       let mediaStream = null;
       let isStreaming = false;
-      let inFlight = 0; // pipelined frames awaiting a response
-      let isEncoding = false; // toBlob in progress
-      let frameCount = 0;
-      let fpsWindowStart = performance.now();
 
-      let camFrameCount = 0;
-      let camFpsWindowStart = performance.now();
-      let clientSkipCount = 0;
+      // FPS Trackers
+      let camFrameCount = 0,
+        camFpsWindow = performance.now();
+      let mpFrameCount = 0,
+        mpFpsWindow = performance.now();
+      let yoloFrameCount = 0,
+        yoloFpsWindow = performance.now();
 
-      // ---------- Connection ----------
+      // MediaPipe Pipeline State
+      let handLandmarker = null;
+      let isMpInferencing = false;
+      let mpSkippedFrames = 0;
+      let lastMpVideoTime = -1;
+      let latestMpDetections = [];
+
+      // YOLO Pipeline State
+      let ws = null;
+      let yoloInFlight = 0;
+      let isYoloEncoding = false;
+      let yoloClientSkip = 0;
+      let latestYoloDetections = [];
+      let yoloTargetSize = TARGET_SIZE;
+
+      // ---------- MediaPipe Pipeline ----------
+      async function initMediaPipe() {
+        el.mpStatus.textContent = "[MP: LOADING]";
+        log("MediaPipe: Loading Hand Landmarker...");
+        try {
+          const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm");
+
+          handLandmarker = await HandLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+              delegate: "GPU",
+            },
+            runningMode: "VIDEO",
+            numHands: 2,
+            minHandDetectionConfidence: parseFloat(el.mpConfThres.value),
+            minHandPresenceConfidence: parseFloat(el.mpConfThres.value),
+            minTrackingConfidence: 0.5,
+          });
+
+          el.mpStatus.textContent = "[MP: READY]";
+          log("MediaPipe: Ready.");
+          checkStartReadiness();
+        } catch (err) {
+          el.mpStatus.textContent = "[MP: ERROR]";
+          log(`MediaPipe Init Error: ${err.message}`);
+        }
+      }
+
+      function stepMediaPipe() {
+        if (!isStreaming || !handLandmarker || el.video.readyState < 2) return;
+
+        if (isMpInferencing) {
+          mpSkippedFrames++;
+          el.mpSkip.textContent = mpSkippedFrames;
+          return;
+        }
+
+        if (el.video.currentTime === lastMpVideoTime) return;
+        lastMpVideoTime = el.video.currentTime;
+
+        isMpInferencing = true;
+        const start = performance.now();
+
+        try {
+          const results = handLandmarker.detectForVideo(el.video, performance.now());
+          const inferDuration = performance.now() - start;
+          handleMpResult(results, inferDuration);
+        } catch (e) {
+          log(`MediaPipe Infer Error: ${e.message}`);
+        } finally {
+          isMpInferencing = false;
+        }
+      }
+
+      function handleMpResult(results, inferDuration) {
+        updateMpFps();
+        el.mpInfer.textContent = `${inferDuration.toFixed(1)}ms`;
+
+        const detections = [];
+        const confThres = parseFloat(el.mpConfThres.value);
+
+        if (results.landmarks && results.landmarks.length > 0) {
+          results.landmarks.forEach((landmarks, index) => {
+            const handedness = results.handednesses?.[index]?.[0];
+            const label = handedness?.categoryName || (index === 0 ? "Left" : "Right");
+            const score = handedness?.score ?? 1.0;
+
+            if (score >= confThres && landmarks[INDEX_FINGER_TIP]) {
+              const tip = landmarks[INDEX_FINGER_TIP];
+              detections.push({
+                type: "hand",
+                label: `${label} Index`,
+                hand: label,
+                score: score,
+                normX: tip.x,
+                normY: tip.y,
+              });
+            }
+          });
+        }
+
+        latestMpDetections = detections;
+        renderOverlay();
+      }
+
+      function updateMpFps() {
+        mpFrameCount++;
+        const now = performance.now();
+        if (now - mpFpsWindow >= 1000) {
+          el.mpFps.textContent = ((mpFrameCount * 1000) / (now - mpFpsWindow)).toFixed(1);
+          mpFrameCount = 0;
+          mpFpsWindow = now;
+        }
+      }
+
+      // ---------- YOLO WebSocket Pipeline ----------
       function connectWebSocket() {
         const url = el.wsUrl.value.trim();
         if (!url) return;
 
-        log(`Connecting to ${url}...`);
-        setStatus("connecting");
-        el.connectBtn.disabled = true;
+        log(`YOLO: Connecting to ${url}...`);
+        el.yoloStatus.textContent = "[YOLO: CONNECTING]";
+        el.connectYoloBtn.disabled = true;
 
         try {
           ws = new WebSocket(url);
           ws.binaryType = "arraybuffer";
 
           ws.onopen = () => {
-            setStatus("connected");
-            log("Connected.");
-            el.disconnectBtn.disabled = false;
-            inFlight = 0;
+            el.yoloStatus.textContent = "[YOLO: CONNECTED]";
+            log("YOLO: Connected.");
+            el.disconnectYoloBtn.disabled = false;
+            yoloInFlight = 0;
           };
 
           ws.onclose = ({ code }) => {
-            setStatus("disconnected");
-            log(`Disconnected (${code})`);
-            el.connectBtn.disabled = false;
-            el.disconnectBtn.disabled = true;
+            el.yoloStatus.textContent = "[YOLO: DISCONNECTED]";
+            log(`YOLO: Disconnected (${code})`);
+            el.connectYoloBtn.disabled = false;
+            el.disconnectYoloBtn.disabled = true;
             ws = null;
-            inFlight = 0;
+            yoloInFlight = 0;
           };
 
           ws.onerror = () => {
-            setStatus("error");
-            log("WS error.");
+            el.yoloStatus.textContent = "[YOLO: ERROR]";
+            log("YOLO: WebSocket error.");
           };
 
           ws.onmessage = ({ data }) => {
-            inFlight = Math.max(0, inFlight - 1);
-
+            yoloInFlight = Math.max(0, yoloInFlight - 1);
             try {
               const parsed = JSON.parse(data);
-              // Server echoes our send timestamp -> true per-frame RTT despite pipelining
               const rtt = parsed.client_ts ? Math.round(performance.now() - parsed.client_ts) : 0;
-              handleInferenceResult(parsed, rtt);
+              handleYoloResult(parsed, rtt);
             } catch (e) {
-              log(`Parse err: ${e.message}`);
+              log(`YOLO Parse Error: ${e.message}`);
             }
           };
         } catch (e) {
-          log(`Init error: ${e.message}`);
-          setStatus("error");
-          el.connectBtn.disabled = false;
+          log(`YOLO Init Error: ${e.message}`);
+          el.yoloStatus.textContent = "[YOLO: ERROR]";
+          el.connectYoloBtn.disabled = false;
         }
       }
 
-      // ---------- Camera ----------
+      function stepYolo() {
+        if (!isStreaming || ws?.readyState !== WebSocket.OPEN || el.video.readyState < 2) return;
+
+        if (isYoloEncoding || yoloInFlight >= MAX_IN_FLIGHT || ws.bufferedAmount > MAX_BUFFERED_BYTES) {
+          yoloClientSkip++;
+          el.yoloSkip.textContent = yoloClientSkip;
+          return;
+        }
+
+        isYoloEncoding = true;
+        // Efficiently draw the active video to offscreen buffer
+        offscreenCtx.drawImage(el.video, 0, 0, TARGET_SIZE, TARGET_SIZE);
+        offscreen.toBlob(
+          (blob) => {
+            isYoloEncoding = false;
+            if (!blob || ws?.readyState !== WebSocket.OPEN || !isStreaming) return;
+
+            const header = new ArrayBuffer(8);
+            new DataView(header).setFloat64(0, performance.now(), true);
+            yoloInFlight++;
+            ws.send(new Blob([header, blob]));
+          },
+          "image/jpeg",
+          JPEG_QUALITY,
+        );
+      }
+
+      function handleYoloResult(data, rtt) {
+        updateYoloFps();
+        el.yoloInfer.textContent = `${(data.infer_ms || 0).toFixed(1)}ms`;
+        el.yoloRtt.textContent = `${rtt}ms`;
+        el.yoloSkip.textContent = yoloClientSkip + (data.dropped_total || 0);
+
+        yoloTargetSize = data.target_size || TARGET_SIZE;
+        const confThres = parseFloat(el.yoloConfThres.value);
+
+        const rawDetections = (data.detections || []).filter((d) => d.score >= confThres);
+        latestYoloDetections = rawDetections.map((det) => {
+          let [x1, y1, x2, y2] = det.box;
+          if (x2 < x1 || y2 < y1) [x1, y1, x2, y2] = cxcywhToXyxy(x1, y1, x2, y2);
+          return {
+            type: "puck",
+            class_id: det.class_id,
+            label: YOLO_CLASSES[det.class_id] || `id:${det.class_id}`,
+            score: det.score,
+            box: [x1, y1, x2, y2],
+          };
+        });
+
+        renderOverlay();
+      }
+
+      function updateYoloFps() {
+        yoloFrameCount++;
+        const now = performance.now();
+        if (now - yoloFpsWindow >= 1000) {
+          el.yoloFps.textContent = ((yoloFrameCount * 1000) / (now - yoloFpsWindow)).toFixed(1);
+          yoloFrameCount = 0;
+          yoloFpsWindow = now;
+        }
+      }
+
+      // ---------- Shared Video Loop ----------
+      function startCaptureLoop() {
+        const onFrame = () => {
+          if (!isStreaming) return;
+          updateCamFps();
+
+          // Dispatch async frames to both models concurrently
+          stepMediaPipe();
+          stepYolo();
+
+          scheduleNext();
+        };
+
+        const scheduleNext = () => {
+          if (!isStreaming) return;
+          if (el.video.requestVideoFrameCallback) {
+            el.video.requestVideoFrameCallback(onFrame);
+          } else {
+            requestAnimationFrame(onFrame);
+          }
+        };
+
+        scheduleNext();
+      }
+
+      function updateCamFps() {
+        camFrameCount++;
+        const now = performance.now();
+        if (now - camFpsWindow >= 1000) {
+          el.camFps.textContent = ((camFrameCount * 1000) / (now - camFpsWindow)).toFixed(1);
+          camFrameCount = 0;
+          camFpsWindow = now;
+        }
+      }
+
+      // ---------- Unified Rendering ----------
+      function renderOverlay() {
+        if (!isStreaming || el.video.readyState < 2) return;
+
+        const targetW = el.video.videoWidth || TARGET_SIZE;
+        const targetH = el.video.videoHeight || TARGET_SIZE;
+        if (el.canvas.width !== targetW) el.canvas.width = targetW;
+        if (el.canvas.height !== targetH) el.canvas.height = targetH;
+
+        // Draw webcam feed once per composite render
+        ctx.drawImage(el.video, 0, 0, el.canvas.width, el.canvas.height);
+
+        // 1. Draw YOLO detections (Boxes)
+        const scaleX = el.canvas.width / yoloTargetSize;
+        const scaleY = el.canvas.height / yoloTargetSize;
+
+        latestYoloDetections.forEach(({ box, score, class_id }) => {
+          const [x1, y1, x2, y2] = box;
+          const boxX = x1 * scaleX;
+          const boxY = y1 * scaleY;
+          const boxW = (x2 - x1) * scaleX;
+          const boxH = (y2 - y1) * scaleY;
+          const color = YOLO_COLORS[class_id] || "#00ff00";
+
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+          ctx.font = "11px monospace";
+          ctx.fillStyle = color;
+          ctx.textAlign = "left";
+          ctx.fillText(`${(score * 100).toFixed(0)}%`, boxX + 1, boxY > 12 ? boxY - 3 : boxY + 12);
+        });
+
+        // 2. Draw MediaPipe detections (Fingertips)
+        latestMpDetections.forEach(({ normX, normY, hand, score }) => {
+          const x = normX * el.canvas.width;
+          const y = normY * el.canvas.height;
+          const color = HAND_COLORS[hand] || "#00ff00";
+
+          ctx.beginPath();
+          ctx.arc(x, y, 6, 0, 2 * Math.PI);
+          ctx.fillStyle = color;
+          ctx.fill();
+
+          ctx.font = "11px monospace";
+          ctx.fillStyle = color;
+          ctx.textAlign = "left";
+          ctx.fillText(`${hand} ${(score * 100).toFixed(0)}%`, x + 8, y > 12 ? y - 3 : y + 12);
+        });
+
+        // Update unified detections table
+        updateDetectionsTable();
+      }
+
+      function updateDetectionsTable() {
+        const rows = [];
+
+        latestMpDetections.forEach((d) => {
+          const pxX = Math.round(d.normX * el.canvas.width);
+          const pxY = Math.round(d.normY * el.canvas.height);
+          rows.push(`
+            <tr>
+              <td style="color: ${HAND_COLORS[d.hand] || "inherit"}">${d.label}</td>
+              <td style="text-align: right">${(d.score * 100).toFixed(1)}%</td>
+              <td style="text-align: right; color: var(--muted)">[${pxX}, ${pxY}]</td>
+            </tr>
+          `);
+        });
+
+        latestYoloDetections.forEach((d) => {
+          const formattedBox = d.box.map(Math.round).join(", ");
+          rows.push(`
+            <tr>
+              <td style="color: ${YOLO_COLORS[d.class_id] || "inherit"}">${d.label}</td>
+              <td style="text-align: right">${(d.score * 100).toFixed(1)}%</td>
+              <td style="text-align: right; color: var(--muted)">[${formattedBox}]</td>
+            </tr>
+          `);
+        });
+
+        el.detectionsList.innerHTML = rows.length === 0 ? '<tr><td colspan="3" style="color: var(--muted)">0 active detections</td></tr>' : rows.join("");
+      }
+
+      function drawNoSignal() {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, el.canvas.width, el.canvas.height);
+        ctx.fillStyle = "#666";
+        ctx.font = "11px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("NO SIGNAL", el.canvas.width / 2, el.canvas.height / 2);
+      }
+
+      // ---------- Camera Devices ----------
       async function scanCameras() {
         try {
           if (!mediaStream && el.cameraSelect.options.length <= 1) {
@@ -427,10 +773,17 @@
           }
 
           el.cameraSelect.innerHTML = devices.map((d, i) => `<option value="${d.deviceId}">${d.label || `Camera ${i + 1}`}</option>`).join("");
-          el.startCamBtn.disabled = false;
+
+          checkStartReadiness();
           log(`Found ${devices.length} camera(s).`);
         } catch (err) {
-          log(`Scan error: ${err.message}`);
+          log(`Camera scan error: ${err.message}`);
+        }
+      }
+
+      function checkStartReadiness() {
+        if (el.cameraSelect.value || el.cameraSelect.options.length > 0) {
+          el.startCamBtn.disabled = false;
         }
       }
 
@@ -451,10 +804,10 @@
 
           isStreaming = true;
           setCameraControls(true);
-          log("Camera started.");
+          log("Camera stream started.");
           startCaptureLoop();
         } catch (err) {
-          log(`Camera error: ${err.message}`);
+          log(`Camera start failed: ${err.message}`);
         }
       }
 
@@ -463,152 +816,16 @@
         mediaStream?.getTracks().forEach((t) => t.stop());
         mediaStream = null;
         el.video.srcObject = null;
+        latestMpDetections = [];
+        latestYoloDetections = [];
         setCameraControls(false);
-        log("Camera stopped.");
+        log("Camera stream stopped.");
         drawNoSignal();
+        updateDetectionsTable();
       }
 
-      // ---------- Streaming Loop (camera-driven, pipelined) ----------
-      function startCaptureLoop() {
-        const onFrame = () => {
-          if (!isStreaming) return;
-          updateCamFps();
-          trySendFrame();
-          scheduleNext();
-        };
-        const scheduleNext = () => {
-          if (!isStreaming) return;
-          if (el.video.requestVideoFrameCallback) {
-            el.video.requestVideoFrameCallback(onFrame);
-          } else {
-            requestAnimationFrame(onFrame);
-          }
-        };
-        scheduleNext();
-      }
-
-      function updateCamFps() {
-        camFrameCount++;
-        const now = performance.now();
-        if (now - camFpsWindowStart >= 1000) {
-          el.camFps.textContent = ((camFrameCount * 1000) / (now - camFpsWindowStart)).toFixed(1);
-          camFrameCount = 0;
-          camFpsWindowStart = now;
-        }
-      }
-
-      function trySendFrame() {
-        if (!isStreaming || ws?.readyState !== WebSocket.OPEN || el.video.readyState < 2) return;
-
-        if (isEncoding || inFlight >= MAX_IN_FLIGHT || ws.bufferedAmount > MAX_BUFFERED_BYTES) {
-          clientSkipCount++;
-          el.skip.textContent = clientSkipCount;
-          return;
-        }
-
-        isEncoding = true;
-        offscreenCtx.drawImage(el.video, 0, 0, TARGET_SIZE, TARGET_SIZE);
-        offscreen.toBlob(
-          (blob) => {
-            isEncoding = false;
-            if (!blob || ws?.readyState !== WebSocket.OPEN || !isStreaming) return;
-
-            // Prefix an 8-byte float64 timestamp header (echoed by server for RTT)
-            const header = new ArrayBuffer(8);
-            new DataView(header).setFloat64(0, performance.now(), true);
-            inFlight++;
-            ws.send(new Blob([header, blob]));
-          },
-          "image/jpeg",
-          JPEG_QUALITY,
-        );
-      }
-
-      function handleInferenceResult(data, rtt) {
-        updateFps();
-        el.infer.textContent = `${(data.infer_ms || 0).toFixed(1)}ms`;
-        el.rtt.textContent = `${rtt}ms`;
-
-        const totalSkipped = clientSkipCount + (data.dropped_total || 0);
-        el.skip.textContent = totalSkipped;
-
-        const confThres = parseFloat(el.confThres.value);
-        const detections = (data.detections || []).filter((d) => d.score >= confThres);
-        el.detCount.textContent = detections.length;
-
-        const targetW = el.video.videoWidth || TARGET_SIZE;
-        const targetH = el.video.videoHeight || TARGET_SIZE;
-        if (el.canvas.width !== targetW) el.canvas.width = targetW;
-        if (el.canvas.height !== targetH) el.canvas.height = targetH;
-
-        ctx.drawImage(el.video, 0, 0, el.canvas.width, el.canvas.height);
-
-        const scaleX = el.canvas.width / (data.target_size || TARGET_SIZE);
-        const scaleY = el.canvas.height / (data.target_size || TARGET_SIZE);
-
-        detections.forEach((det) => drawDetection(det, scaleX, scaleY));
-        renderDetectionsList(detections);
-      }
-
-      function updateFps() {
-        frameCount++;
-        const now = performance.now();
-        if (now - fpsWindowStart >= 1000) {
-          el.fps.textContent = ((frameCount * 1000) / (now - fpsWindowStart)).toFixed(1);
-          frameCount = 0;
-          fpsWindowStart = now;
-        }
-      }
-
-      // ---------- Rendering ----------
-      function drawDetection({ box, score, class_id }, scaleX, scaleY) {
-        let [x1, y1, x2, y2] = box;
-        if (x2 < x1 || y2 < y1) [x1, y1, x2, y2] = cxcywhToXyxy(x1, y1, x2, y2);
-
-        const [boxX, boxY, boxW, boxH] = [x1 * scaleX, y1 * scaleY, (x2 - x1) * scaleX, (y2 - y1) * scaleY];
-        const color = getClassColor(class_id);
-
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(boxX, boxY, boxW, boxH);
-
-        ctx.font = "11px monospace";
-        ctx.fillStyle = color;
-        ctx.textAlign = "left";
-        ctx.fillText(`${(score * 100).toFixed(0)}%`, boxX + 1, boxY > 12 ? boxY - 3 : boxY + 12);
-      }
-
-      function renderDetectionsList(detections) {
-        el.detectionsList.innerHTML =
-          detections.length === 0
-            ? '<tr><td colspan="3" style="color: var(--muted)">0 objects</td></tr>'
-            : detections
-                .map(
-                  ({ class_id, score, box }) => `
-                    <tr>
-                      <td>${CLASS_NAMES[class_id] || `id:${class_id}`}</td>
-                      <td style="text-align: right">${(score * 100).toFixed(1)}%</td>
-                      <td style="text-align: right; color: var(--muted)">[${box ? box.map(Math.round).join(",") : "-"}]</td>
-                    </tr>`,
-                )
-                .join("");
-      }
-
-      function drawNoSignal() {
-        ctx.fillStyle = "#000";
-        ctx.fillRect(0, 0, el.canvas.width, el.canvas.height);
-        ctx.fillStyle = "#666";
-        ctx.font = "11px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText("NO SIGNAL", el.canvas.width / 2, el.canvas.height / 2);
-      }
-
-      // ---------- Pure Helpers ----------
-      const getClassColor = (classId) => CLASS_COLORS[classId] || `hsl(${(classId * 137) % 360}, 100%, 50%)`;
-
+      // ---------- Helpers ----------
       const cxcywhToXyxy = (cx, cy, w, h) => [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2];
-
-      const setStatus = (state) => (el.status.textContent = `[${state.toUpperCase()}]`);
 
       const setCameraControls = (running) => {
         el.startCamBtn.disabled = running;
@@ -630,18 +847,37 @@
           : `${proto}//${host}:${DEFAULT_PORT}/ws`;
       };
 
-      // ---------- Init ----------
+      // ---------- Event Listeners ----------
       el.wsUrl.value = buildDefaultWsUrl();
       drawNoSignal();
 
-      el.confThres.addEventListener("input", ({ target }) => (el.confValue.textContent = target.value));
-      el.connectBtn.addEventListener("click", connectWebSocket);
-      el.disconnectBtn.addEventListener("click", () => ws?.close());
+      el.mpConfThres.addEventListener("input", async ({ target }) => {
+        el.mpConfValue.textContent = target.value;
+        if (handLandmarker) {
+          await handLandmarker.setOptions({
+            minHandDetectionConfidence: parseFloat(target.value),
+            minHandPresenceConfidence: parseFloat(target.value),
+          });
+        }
+      });
+
+      el.yoloConfThres.addEventListener("input", ({ target }) => {
+        el.yoloConfValue.textContent = target.value;
+      });
+
+      el.reloadMpBtn.addEventListener("click", initMediaPipe);
+      el.connectYoloBtn.addEventListener("click", connectWebSocket);
+      el.disconnectYoloBtn.addEventListener("click", () => ws?.close());
+
       el.refreshCamerasBtn.addEventListener("click", scanCameras);
       el.startCamBtn.addEventListener("click", startCamera);
       el.stopCamBtn.addEventListener("click", stopCamera);
 
-      scanCameras();
+      // Startup
+      (async () => {
+        await initMediaPipe();
+        await scanCameras();
+      })();
     </script>
   </body>
 </html>

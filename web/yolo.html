@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YOLO26 Inference Console</title>
+    <style>
+      :root {
+        --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        --border: #ddd;
+        --border-soft: #f0f0f0;
+        --bg: #fff;
+        --bg-panel: #fafafa;
+        --bg-head: #f5f5f5;
+        --fg: #111;
+        --muted: #666;
+        --gap: 0.5rem;
+        --radius: 2px;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        font-size: 12px;
+        color: var(--fg);
+        background: var(--bg);
+        padding: var(--gap);
+        line-height: 1.4;
+      }
+
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.25rem;
+        margin-bottom: var(--gap);
+
+        h1 {
+          font-size: 13px;
+          font-weight: 600;
+        }
+
+        .status-indicator {
+          font-family: var(--font-mono);
+          font-weight: 600;
+          font-size: 11px;
+        }
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 280px minmax(0, 1fr);
+        gap: var(--gap);
+        align-items: start;
+
+        @media (max-width: 768px) {
+          grid-template-columns: 1fr;
+
+          > .viewport-column {
+            order: -1;
+          }
+        }
+      }
+
+      .sidebar,
+      .viewport-column {
+        display: flex;
+        flex-direction: column;
+        gap: var(--gap);
+      }
+
+      fieldset {
+        border: 1px solid var(--border);
+        padding: 0.35rem 0.45rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+
+        legend {
+          font-size: 10px;
+          font-weight: 600;
+          padding: 0 0.2rem;
+          color: var(--muted);
+          text-transform: uppercase;
+        }
+      }
+
+      .row {
+        display: flex;
+        gap: 0.3rem;
+        align-items: center;
+
+        > * {
+          flex: 1;
+        }
+      }
+
+      label {
+        font-size: 11px;
+        display: flex;
+        justify-content: space-between;
+      }
+
+      input[type="text"],
+      select,
+      button {
+        font-family: inherit;
+        font-size: 11px;
+        padding: 2px 4px;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        border-radius: var(--radius);
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 2px;
+        font-family: var(--font-mono);
+        text-align: center;
+
+        .metric-box {
+          border: 1px solid var(--border);
+          padding: 2px;
+        }
+
+        .metric-label {
+          font-size: 9px;
+          color: var(--muted);
+          display: block;
+        }
+
+        .metric-val {
+          font-size: 11px;
+          font-weight: 600;
+        }
+      }
+
+      #logPanel {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        height: 60px;
+        border: 1px solid var(--border);
+        padding: 3px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        background: var(--bg-panel);
+      }
+
+      .detections-table-container {
+        max-height: 120px;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          font-family: var(--font-mono);
+          font-size: 10px;
+
+          th {
+            background: var(--bg-head);
+            text-align: left;
+            padding: 2px 4px;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+          }
+
+          tr:not(:last-child) {
+            border-bottom: 1px solid var(--border-soft);
+          }
+
+          td {
+            padding: 2px 4px;
+          }
+        }
+      }
+
+      .viewport-container {
+        border: 1px solid var(--border);
+        background: #000;
+        width: 100%;
+        max-width: 640px;
+        aspect-ratio: 1 / 1;
+        position: relative;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        overflow: hidden;
+
+        video {
+          display: none;
+        }
+
+        canvas {
+          display: block;
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>YOLO26 Console</h1>
+      <div id="statusIndicator" class="status-indicator">[DISCONNECTED]</div>
+    </header>
+
+    <main class="layout">
+      <div class="sidebar">
+        <fieldset>
+          <legend>Server</legend>
+          <input type="text" id="wsUrl" placeholder="ws://localhost:18888/ws" />
+          <div class="row">
+            <button id="connectBtn">Connect</button>
+            <button id="disconnectBtn" disabled>Disconnect</button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Camera</legend>
+          <div class="row">
+            <select id="cameraSelect">
+              <option value="">-- Scan Devices --</option>
+            </select>
+            <button id="refreshCamerasBtn" style="flex: 0 0 auto">Scan</button>
+          </div>
+          <div class="row">
+            <button id="startCamBtn" disabled>Start</button>
+            <button id="stopCamBtn" disabled>Stop</button>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Parameters</legend>
+          <label for="confThres">
+            <span>Confidence Threshold</span>
+            <span id="confValue" style="font-family: var(--font-mono)">0.25</span>
+          </label>
+          <input type="range" id="confThres" min="0.05" max="0.95" step="0.05" value="0.25" />
+        </fieldset>
+
+        <fieldset>
+          <legend>Metrics</legend>
+          <div class="metrics-grid" style="grid-template-columns: repeat(3, 1fr)">
+            <div class="metric-box"><span class="metric-label">CAM FPS</span><span class="metric-val" id="camFpsStat">0.0</span></div>
+            <div class="metric-box"><span class="metric-label">INF FPS</span><span class="metric-val" id="fpsStat">0.0</span></div>
+            <div class="metric-box"><span class="metric-label">INFER</span><span class="metric-val" id="inferStat">0ms</span></div>
+            <div class="metric-box"><span class="metric-label">RTT</span><span class="metric-val" id="rttStat">0ms</span></div>
+            <div class="metric-box"><span class="metric-label">SKIPPED</span><span class="metric-val" id="skipStat">0</span></div>
+            <div class="metric-box"><span class="metric-label">COUNT</span><span class="metric-val" id="detCountStat">0</span></div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Logs</legend>
+          <div id="logPanel">Ready.</div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Detections</legend>
+          <div class="detections-table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Class</th>
+                  <th style="text-align: right">Score</th>
+                  <th style="text-align: right">BBox</th>
+                </tr>
+              </thead>
+              <tbody id="detectionsList">
+                <tr>
+                  <td colspan="3" style="color: var(--muted)">No active stream</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="viewport-column">
+        <div class="viewport-container">
+          <video id="webcam" playsinline muted></video>
+          <canvas id="outputCanvas" width="640" height="640"></canvas>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      // ---------- Constants ----------
+      const TARGET_SIZE = 640;
+      const JPEG_QUALITY = 0.75;
+      const DEFAULT_PORT = "18888";
+      // Pipelining: allow up to N frames in flight (overlap network + GPU).
+      // Backend keeps only the newest frame, so extra frames are cheaply discarded.
+      const MAX_IN_FLIGHT = 2;
+      // Backpressure: don't enqueue if the socket send buffer is congested.
+      const MAX_BUFFERED_BYTES = 256 * 1024;
+
+      const CLASS_NAMES = { 0: "blue puck", 1: "pink puck" };
+      const CLASS_COLORS = { 0: "#0066ff", 1: "#ff007f" };
+
+      const $ = (id) => document.getElementById(id);
+      const el = {
+        wsUrl: $("wsUrl"),
+        connectBtn: $("connectBtn"),
+        disconnectBtn: $("disconnectBtn"),
+        cameraSelect: $("cameraSelect"),
+        refreshCamerasBtn: $("refreshCamerasBtn"),
+        startCamBtn: $("startCamBtn"),
+        stopCamBtn: $("stopCamBtn"),
+        confThres: $("confThres"),
+        confValue: $("confValue"),
+        status: $("statusIndicator"),
+        camFps: $("camFpsStat"),
+        fps: $("fpsStat"),
+        infer: $("inferStat"),
+        rtt: $("rttStat"),
+        skip: $("skipStat"),
+        detCount: $("detCountStat"),
+        detectionsList: $("detectionsList"),
+        logPanel: $("logPanel"),
+        video: $("webcam"),
+        canvas: $("outputCanvas"),
+      };
+
+      const ctx = el.canvas.getContext("2d");
+      const offscreen = Object.assign(document.createElement("canvas"), { width: TARGET_SIZE, height: TARGET_SIZE });
+      const offscreenCtx = offscreen.getContext("2d", { willReadFrequently: false });
+
+      // ---------- State ----------
+      let ws = null;
+      let mediaStream = null;
+      let isStreaming = false;
+      let inFlight = 0; // pipelined frames awaiting a response
+      let isEncoding = false; // toBlob in progress
+      let frameCount = 0;
+      let fpsWindowStart = performance.now();
+
+      let camFrameCount = 0;
+      let camFpsWindowStart = performance.now();
+      let clientSkipCount = 0;
+
+      // ---------- Connection ----------
+      function connectWebSocket() {
+        const url = el.wsUrl.value.trim();
+        if (!url) return;
+
+        log(`Connecting to ${url}...`);
+        setStatus("connecting");
+        el.connectBtn.disabled = true;
+
+        try {
+          ws = new WebSocket(url);
+          ws.binaryType = "arraybuffer";
+
+          ws.onopen = () => {
+            setStatus("connected");
+            log("Connected.");
+            el.disconnectBtn.disabled = false;
+            inFlight = 0;
+          };
+
+          ws.onclose = ({ code }) => {
+            setStatus("disconnected");
+            log(`Disconnected (${code})`);
+            el.connectBtn.disabled = false;
+            el.disconnectBtn.disabled = true;
+            ws = null;
+            inFlight = 0;
+          };
+
+          ws.onerror = () => {
+            setStatus("error");
+            log("WS error.");
+          };
+
+          ws.onmessage = ({ data }) => {
+            inFlight = Math.max(0, inFlight - 1);
+
+            try {
+              const parsed = JSON.parse(data);
+              // Server echoes our send timestamp -> true per-frame RTT despite pipelining
+              const rtt = parsed.client_ts ? Math.round(performance.now() - parsed.client_ts) : 0;
+              handleInferenceResult(parsed, rtt);
+            } catch (e) {
+              log(`Parse err: ${e.message}`);
+            }
+          };
+        } catch (e) {
+          log(`Init error: ${e.message}`);
+          setStatus("error");
+          el.connectBtn.disabled = false;
+        }
+      }
+
+      // ---------- Camera ----------
+      async function scanCameras() {
+        try {
+          if (!mediaStream && el.cameraSelect.options.length <= 1) {
+            try {
+              const temp = await navigator.mediaDevices.getUserMedia({ video: true });
+              temp.getTracks().forEach((t) => t.stop());
+            } catch {}
+          }
+
+          const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+
+          if (devices.length === 0) {
+            el.cameraSelect.innerHTML = '<option value="">No cameras found</option>';
+            el.startCamBtn.disabled = true;
+            return;
+          }
+
+          el.cameraSelect.innerHTML = devices.map((d, i) => `<option value="${d.deviceId}">${d.label || `Camera ${i + 1}`}</option>`).join("");
+          el.startCamBtn.disabled = false;
+          log(`Found ${devices.length} camera(s).`);
+        } catch (err) {
+          log(`Scan error: ${err.message}`);
+        }
+      }
+
+      async function startCamera() {
+        const deviceId = el.cameraSelect.value;
+        const video = {
+          ...(deviceId && { deviceId: { exact: deviceId } }),
+          width: { ideal: TARGET_SIZE },
+          height: { ideal: TARGET_SIZE },
+          frameRate: { ideal: 60 },
+        };
+
+        try {
+          if (mediaStream) stopCamera();
+          mediaStream = await navigator.mediaDevices.getUserMedia({ video });
+          el.video.srcObject = mediaStream;
+          await el.video.play();
+
+          isStreaming = true;
+          setCameraControls(true);
+          log("Camera started.");
+          startCaptureLoop();
+        } catch (err) {
+          log(`Camera error: ${err.message}`);
+        }
+      }
+
+      function stopCamera() {
+        isStreaming = false;
+        mediaStream?.getTracks().forEach((t) => t.stop());
+        mediaStream = null;
+        el.video.srcObject = null;
+        setCameraControls(false);
+        log("Camera stopped.");
+        drawNoSignal();
+      }
+
+      // ---------- Streaming Loop (camera-driven, pipelined) ----------
+      function startCaptureLoop() {
+        const onFrame = () => {
+          if (!isStreaming) return;
+          updateCamFps();
+          trySendFrame();
+          scheduleNext();
+        };
+        const scheduleNext = () => {
+          if (!isStreaming) return;
+          if (el.video.requestVideoFrameCallback) {
+            el.video.requestVideoFrameCallback(onFrame);
+          } else {
+            requestAnimationFrame(onFrame);
+          }
+        };
+        scheduleNext();
+      }
+
+      function updateCamFps() {
+        camFrameCount++;
+        const now = performance.now();
+        if (now - camFpsWindowStart >= 1000) {
+          el.camFps.textContent = ((camFrameCount * 1000) / (now - camFpsWindowStart)).toFixed(1);
+          camFrameCount = 0;
+          camFpsWindowStart = now;
+        }
+      }
+
+      function trySendFrame() {
+        if (!isStreaming || ws?.readyState !== WebSocket.OPEN || el.video.readyState < 2) return;
+
+        if (isEncoding || inFlight >= MAX_IN_FLIGHT || ws.bufferedAmount > MAX_BUFFERED_BYTES) {
+          clientSkipCount++;
+          el.skip.textContent = clientSkipCount;
+          return;
+        }
+
+        isEncoding = true;
+        offscreenCtx.drawImage(el.video, 0, 0, TARGET_SIZE, TARGET_SIZE);
+        offscreen.toBlob(
+          (blob) => {
+            isEncoding = false;
+            if (!blob || ws?.readyState !== WebSocket.OPEN || !isStreaming) return;
+
+            // Prefix an 8-byte float64 timestamp header (echoed by server for RTT)
+            const header = new ArrayBuffer(8);
+            new DataView(header).setFloat64(0, performance.now(), true);
+            inFlight++;
+            ws.send(new Blob([header, blob]));
+          },
+          "image/jpeg",
+          JPEG_QUALITY,
+        );
+      }
+
+      function handleInferenceResult(data, rtt) {
+        updateFps();
+        el.infer.textContent = `${(data.infer_ms || 0).toFixed(1)}ms`;
+        el.rtt.textContent = `${rtt}ms`;
+
+        const totalSkipped = clientSkipCount + (data.dropped_total || 0);
+        el.skip.textContent = totalSkipped;
+
+        const confThres = parseFloat(el.confThres.value);
+        const detections = (data.detections || []).filter((d) => d.score >= confThres);
+        el.detCount.textContent = detections.length;
+
+        const targetW = el.video.videoWidth || TARGET_SIZE;
+        const targetH = el.video.videoHeight || TARGET_SIZE;
+        if (el.canvas.width !== targetW) el.canvas.width = targetW;
+        if (el.canvas.height !== targetH) el.canvas.height = targetH;
+
+        ctx.drawImage(el.video, 0, 0, el.canvas.width, el.canvas.height);
+
+        const scaleX = el.canvas.width / (data.target_size || TARGET_SIZE);
+        const scaleY = el.canvas.height / (data.target_size || TARGET_SIZE);
+
+        detections.forEach((det) => drawDetection(det, scaleX, scaleY));
+        renderDetectionsList(detections);
+      }
+
+      function updateFps() {
+        frameCount++;
+        const now = performance.now();
+        if (now - fpsWindowStart >= 1000) {
+          el.fps.textContent = ((frameCount * 1000) / (now - fpsWindowStart)).toFixed(1);
+          frameCount = 0;
+          fpsWindowStart = now;
+        }
+      }
+
+      // ---------- Rendering ----------
+      function drawDetection({ box, score, class_id }, scaleX, scaleY) {
+        let [x1, y1, x2, y2] = box;
+        if (x2 < x1 || y2 < y1) [x1, y1, x2, y2] = cxcywhToXyxy(x1, y1, x2, y2);
+
+        const [boxX, boxY, boxW, boxH] = [x1 * scaleX, y1 * scaleY, (x2 - x1) * scaleX, (y2 - y1) * scaleY];
+        const color = getClassColor(class_id);
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+        ctx.font = "11px monospace";
+        ctx.fillStyle = color;
+        ctx.textAlign = "left";
+        ctx.fillText(`${(score * 100).toFixed(0)}%`, boxX + 1, boxY > 12 ? boxY - 3 : boxY + 12);
+      }
+
+      function renderDetectionsList(detections) {
+        el.detectionsList.innerHTML =
+          detections.length === 0
+            ? '<tr><td colspan="3" style="color: var(--muted)">0 objects</td></tr>'
+            : detections
+                .map(
+                  ({ class_id, score, box }) => `
+                    <tr>
+                      <td>${CLASS_NAMES[class_id] || `id:${class_id}`}</td>
+                      <td style="text-align: right">${(score * 100).toFixed(1)}%</td>
+                      <td style="text-align: right; color: var(--muted)">[${box ? box.map(Math.round).join(",") : "-"}]</td>
+                    </tr>`,
+                )
+                .join("");
+      }
+
+      function drawNoSignal() {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, el.canvas.width, el.canvas.height);
+        ctx.fillStyle = "#666";
+        ctx.font = "11px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("NO SIGNAL", el.canvas.width / 2, el.canvas.height / 2);
+      }
+
+      // ---------- Pure Helpers ----------
+      const getClassColor = (classId) => CLASS_COLORS[classId] || `hsl(${(classId * 137) % 360}, 100%, 50%)`;
+
+      const cxcywhToXyxy = (cx, cy, w, h) => [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2];
+
+      const setStatus = (state) => (el.status.textContent = `[${state.toUpperCase()}]`);
+
+      const setCameraControls = (running) => {
+        el.startCamBtn.disabled = running;
+        el.stopCamBtn.disabled = !running;
+        el.cameraSelect.disabled = running;
+      };
+
+      const log = (msg) => {
+        const time = new Date().toTimeString().split(" ")[0];
+        el.logPanel.textContent += `[${time}] ${msg}\n`;
+        el.logPanel.scrollTop = el.logPanel.scrollHeight;
+      };
+
+      const buildDefaultWsUrl = () => {
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const host = location.hostname || "localhost";
+        return location.protocol.startsWith("http") && location.port === DEFAULT_PORT
+          ? `${proto}//${location.host}/ws`
+          : `${proto}//${host}:${DEFAULT_PORT}/ws`;
+      };
+
+      // ---------- Init ----------
+      el.wsUrl.value = buildDefaultWsUrl();
+      drawNoSignal();
+
+      el.confThres.addEventListener("input", ({ target }) => (el.confValue.textContent = target.value));
+      el.connectBtn.addEventListener("click", connectWebSocket);
+      el.disconnectBtn.addEventListener("click", () => ws?.close());
+      el.refreshCamerasBtn.addEventListener("click", scanCameras);
+      el.startCamBtn.addEventListener("click", startCamera);
+      el.stopCamBtn.addEventListener("click", stopCamera);
+
+      scanCameras();
+    </script>
+  </body>
+</html>
