@@ -242,6 +242,52 @@
           object-fit: contain;
         }
       }
+
+      .thumbnail-section {
+        max-width: 640px;
+      }
+
+      .thumbnail-card {
+        display: flex;
+        gap: 0.6rem;
+        align-items: center;
+      }
+
+      .thumbnail-preview {
+        width: 120px;
+        height: 120px;
+        background: #000;
+        border: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+
+        canvas {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+          display: none;
+        }
+
+        .placeholder {
+          color: var(--muted);
+          font-size: 10px;
+          text-align: center;
+          padding: 4px;
+        }
+      }
+
+      .thumbnail-meta {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        line-height: 1.5;
+        color: var(--fg);
+
+        .meta-label {
+          color: var(--muted);
+        }
+      }
     </style>
   </head>
   <body>
@@ -296,7 +342,7 @@
         </fieldset>
 
         <fieldset>
-          <legend>MediaPipe (Index Finger)</legend>
+          <legend>MediaPipe (Index, Thumb &amp; Middle)</legend>
           <div class="row">
             <button id="reloadMpBtn">Reload Model</button>
           </div>
@@ -365,6 +411,24 @@
           <video id="webcam" playsinline muted></video>
           <canvas id="outputCanvas" width="640" height="640"></canvas>
         </div>
+
+        <fieldset class="thumbnail-section">
+          <legend>Dwell Capture (Thumbnail)</legend>
+          <div class="thumbnail-card">
+            <div class="thumbnail-preview">
+              <canvas id="dwellThumbnailCanvas" width="640" height="640"></canvas>
+              <div id="dwellThumbnailPlaceholder" class="mono placeholder">No dwell triggered</div>
+            </div>
+            <div id="dwellMetaInfo" class="thumbnail-meta">
+              <div><span class="meta-label">STATUS: </span><span id="dwellMetaStatus">Idle (r=5px, t=300ms, d>45px)</span></div>
+              <div><span class="meta-label">LAST TARGET: </span><span id="dwellMetaTarget">None</span></div>
+              <div><span class="meta-label">COORDS: </span><span id="dwellMetaCoords">-</span></div>
+              <div><span class="meta-label">THUMB DIST: </span><span id="dwellMetaThumbDist">-</span></div>
+              <div><span class="meta-label">MIDDLE DIST: </span><span id="dwellMetaMiddleDist">-</span></div>
+              <div><span class="meta-label">TIMESTAMP: </span><span id="dwellMetaTime">-</span></div>
+            </div>
+          </div>
+        </fieldset>
       </div>
     </main>
 
@@ -375,13 +439,51 @@
       const TARGET_SIZE = 640;
       const JPEG_QUALITY = 0.75;
       const DEFAULT_PORT = "18888";
+      const THUMB_TIP = 4;
       const INDEX_FINGER_TIP = 8;
+      const MIDDLE_FINGER_TIP = 12;
       const MAX_IN_FLIGHT = 2;
       const MAX_BUFFERED_BYTES = 256 * 1024;
+
+      // Dwell constants
+      const MIN_INDEX_FINGER_DISTANCE = 45; // minimum distance required from index to both thumb and middle finger (d > 45px)
+      const DWELL_RADIUS = 5; // px radius for dwell zone
+      const DWELL_DURATION_MS = 300; // min duration for dwell
+      const DWELL_CAPTURE_CIRCLE_RADIUS = 30; // px radius for pointing zone overlay
+      const DWELL_CAPTURE_CIRCLE_STROKE = 2; // stroke width for pointing zone overlay
 
       const HAND_COLORS = { Left: "#0066ff", Right: "#ff007f" };
       const YOLO_CLASSES = { 0: "blue puck", 1: "pink puck" };
       const YOLO_COLORS = { 0: "#0066ff", 1: "#ff007f" };
+
+      // ---------- Audio Beep (Web Audio API) ----------
+      let audioCtx = null;
+      function emitBeep(frequency = 880, durationSeconds = 0.1) {
+        try {
+          if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          }
+          if (audioCtx.state === "suspended") {
+            audioCtx.resume();
+          }
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+
+          gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + durationSeconds);
+
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+
+          osc.start();
+          osc.stop(audioCtx.currentTime + durationSeconds);
+        } catch (e) {
+          console.warn("AudioContext beep failed:", e);
+        }
+      }
 
       // ---------- 1€ Filter (Casiez et al.) ----------
       class LowPassFilter {
@@ -498,12 +600,21 @@
           "yoloSkip",
           "detectionsList",
           "logPanel",
+          "dwellThumbnailCanvas",
+          "dwellThumbnailPlaceholder",
+          "dwellMetaStatus",
+          "dwellMetaTarget",
+          "dwellMetaCoords",
+          "dwellMetaThumbDist",
+          "dwellMetaMiddleDist",
+          "dwellMetaTime",
         ].map((id) => [id, document.getElementById(id)]),
       );
       el.video = document.getElementById("webcam");
       el.canvas = document.getElementById("outputCanvas");
 
       const ctx = el.canvas.getContext("2d");
+      const thumbCtx = el.dwellThumbnailCanvas.getContext("2d");
       const offscreen = Object.assign(document.createElement("canvas"), { width: TARGET_SIZE, height: TARGET_SIZE });
       const offscreenCtx = offscreen.getContext("2d", { willReadFrequently: false });
 
@@ -512,8 +623,16 @@
       let isStreaming = false;
 
       const fingerFilters = { Left: new MultiFilter(2), Right: new MultiFilter(2) };
+      const thumbFilters = { Left: new MultiFilter(2), Right: new MultiFilter(2) };
+      const middleFilters = { Left: new MultiFilter(2), Right: new MultiFilter(2) };
       const boxFilters = new Map();
       const lastKnownPucks = new Map();
+
+      // Dwell state trackers for hands
+      const fingerDwellState = {
+        Left: { anchorX: null, anchorY: null, startTime: null, triggered: false },
+        Right: { anchorX: null, anchorY: null, startTime: null, triggered: false },
+      };
 
       const fpsCounters = {};
       const trackFps = (name, target) => {
@@ -533,6 +652,7 @@
       let mpSkippedFrames = 0;
       let lastMpVideoTime = -1;
       let latestMpDetections = [];
+      let latestMpHandTuples = [];
 
       // YOLO pipeline state
       let ws = null;
@@ -619,26 +739,210 @@
         const now = performance.now();
         const activeHands = new Set();
         const detections = [];
+        const handTuples = [];
 
         (results.landmarks || []).forEach((landmarks, index) => {
           const handedness = results.handednesses?.[index]?.[0];
           const hand = handedness?.categoryName || (index === 0 ? "Left" : "Right");
           const score = handedness?.score ?? 1.0;
-          const tip = landmarks[INDEX_FINGER_TIP];
-          if (score < confThres || !tip) return;
+          const indexTip = landmarks[INDEX_FINGER_TIP];
+          const thumbTip = landmarks[THUMB_TIP];
+          const middleTip = landmarks[MIDDLE_FINGER_TIP];
+          if (score < confThres || !indexTip) return;
 
           activeHands.add(hand);
-          const [normX, normY] = filterOn && fingerFilters[hand] ? fingerFilters[hand].filter([tip.x, tip.y], now) : [tip.x, tip.y];
 
-          detections.push({ type: "hand", label: `${hand} Index`, hand, score, normX, normY });
+          // Smooth index finger tip
+          const [indexNormX, indexNormY] =
+            filterOn && fingerFilters[hand] ? fingerFilters[hand].filter([indexTip.x, indexTip.y], now) : [indexTip.x, indexTip.y];
+
+          detections.push({
+            type: "hand",
+            part: "index",
+            label: `${hand} Index`,
+            hand,
+            score,
+            normX: indexNormX,
+            normY: indexNormY,
+          });
+
+          // Smooth thumb tip if available
+          let thumbNormX = null;
+          let thumbNormY = null;
+          if (thumbTip) {
+            [thumbNormX, thumbNormY] = filterOn && thumbFilters[hand] ? thumbFilters[hand].filter([thumbTip.x, thumbTip.y], now) : [thumbTip.x, thumbTip.y];
+
+            detections.push({
+              type: "hand",
+              part: "thumb",
+              label: `${hand} Thumb`,
+              hand,
+              score,
+              normX: thumbNormX,
+              normY: thumbNormY,
+            });
+          }
+
+          // Smooth middle finger tip if available
+          let middleNormX = null;
+          let middleNormY = null;
+          if (middleTip) {
+            [middleNormX, middleNormY] =
+              filterOn && middleFilters[hand] ? middleFilters[hand].filter([middleTip.x, middleTip.y], now) : [middleTip.x, middleTip.y];
+
+            detections.push({
+              type: "hand",
+              part: "middle",
+              label: `${hand} Middle`,
+              hand,
+              score,
+              normX: middleNormX,
+              normY: middleNormY,
+            });
+          }
+
+          handTuples.push({
+            hand,
+            score,
+            indexNormX,
+            indexNormY,
+            thumbNormX,
+            thumbNormY,
+            middleNormX,
+            middleNormY,
+          });
         });
 
         for (const hand of ["Left", "Right"]) {
-          if (!activeHands.has(hand)) fingerFilters[hand].reset();
+          if (!activeHands.has(hand)) {
+            fingerFilters[hand].reset();
+            thumbFilters[hand].reset();
+            middleFilters[hand].reset();
+            resetFingerDwell(hand);
+          }
         }
 
         latestMpDetections = detections;
+        latestMpHandTuples = handTuples;
+        checkHandDwells(handTuples, now);
         renderOverlay();
+      }
+
+      // ---------- Dwell Detection & Thumbnail Capture ----------
+      function resetFingerDwell(hand) {
+        fingerDwellState[hand] = { anchorX: null, anchorY: null, startTime: null, triggered: false };
+      }
+
+      function checkHandDwells(handTuples, timestamp) {
+        if (!isStreaming || el.video.readyState < 2) return;
+
+        const currentW = el.video.videoWidth || TARGET_SIZE;
+        const currentH = el.video.videoHeight || TARGET_SIZE;
+
+        handTuples.forEach(({ hand, indexNormX, indexNormY, thumbNormX, thumbNormY, middleNormX, middleNormY }) => {
+          const indexPixelX = indexNormX * currentW;
+          const indexPixelY = indexNormY * currentH;
+          const state = fingerDwellState[hand];
+
+          // Calculate distance between thumb and index
+          let thumbDist = 0;
+          const hasThumb = thumbNormX !== null && thumbNormY !== null;
+          if (hasThumb) {
+            const thumbPixelX = thumbNormX * currentW;
+            const thumbPixelY = thumbNormY * currentH;
+            thumbDist = Math.hypot(indexPixelX - thumbPixelX, indexPixelY - thumbPixelY);
+          }
+
+          // Calculate distance between middle finger and index
+          let middleDist = 0;
+          const hasMiddle = middleNormX !== null && middleNormY !== null;
+          if (hasMiddle) {
+            const middlePixelX = middleNormX * currentW;
+            const middlePixelY = middleNormY * currentH;
+            middleDist = Math.hypot(indexPixelX - middlePixelX, indexPixelY - middlePixelY);
+          }
+
+          // Dwell requires BOTH thumb and middle finger to be tracked AND both distances > MIN_INDEX_FINGER_DISTANCE (45px)
+          const isEligible = hasThumb && hasMiddle && thumbDist > MIN_INDEX_FINGER_DISTANCE && middleDist > MIN_INDEX_FINGER_DISTANCE;
+
+          if (!isEligible) {
+            resetFingerDwell(hand);
+            return;
+          }
+
+          if (state.anchorX === null || state.anchorY === null) {
+            state.anchorX = indexPixelX;
+            state.anchorY = indexPixelY;
+            state.startTime = timestamp;
+            state.triggered = false;
+            return;
+          }
+
+          const moveDist = Math.hypot(indexPixelX - state.anchorX, indexPixelY - state.anchorY);
+
+          if (moveDist > DWELL_RADIUS) {
+            // Moved outside dwell region: reset anchor to current point
+            state.anchorX = indexPixelX;
+            state.anchorY = indexPixelY;
+            state.startTime = timestamp;
+            state.triggered = false;
+          } else {
+            // Inside dwell region
+            if (!state.triggered && timestamp - state.startTime >= DWELL_DURATION_MS) {
+              state.triggered = true;
+              onDwellTriggered(hand, indexPixelX, indexPixelY, timestamp - state.startTime, thumbDist, middleDist);
+            }
+          }
+        });
+      }
+
+      function onDwellTriggered(hand, pixelX, pixelY, dwellDuration, thumbDist, middleDist) {
+        // 1. Emit short beep
+        emitBeep(880, 0.1);
+
+        // 2. Log event
+        const timeStr = new Date().toTimeString().split(" ")[0];
+        const thumbDistStr = `${Math.round(thumbDist)}px`;
+        const middleDistStr = `${Math.round(middleDist)}px`;
+        log(
+          `Dwell detected: ${hand} index at (${Math.round(pixelX)}, ${Math.round(pixelY)}) [${Math.round(dwellDuration)}ms, thumb: ${thumbDistStr}, middle: ${middleDistStr}]`,
+        );
+
+        // 3. Capture frame without annotations and draw hollow red circle
+        captureDwellFrame(hand, pixelX, pixelY, thumbDistStr, middleDistStr, timeStr);
+      }
+
+      function captureDwellFrame(hand, x, y, thumbDistStr, middleDistStr, timeStr) {
+        if (!el.video || el.video.readyState < 2) return;
+
+        const vidW = el.video.videoWidth || TARGET_SIZE;
+        const vidH = el.video.videoHeight || TARGET_SIZE;
+
+        el.dwellThumbnailCanvas.width = vidW;
+        el.dwellThumbnailCanvas.height = vidH;
+
+        // Draw unannotated frame from video
+        thumbCtx.drawImage(el.video, 0, 0, vidW, vidH);
+
+        // Draw hollow red circle (r = 30, stroke = 2)
+        thumbCtx.save();
+        thumbCtx.beginPath();
+        thumbCtx.arc(x, y, DWELL_CAPTURE_CIRCLE_RADIUS, 0, 2 * Math.PI);
+        thumbCtx.strokeStyle = "#ff0000";
+        thumbCtx.lineWidth = DWELL_CAPTURE_CIRCLE_STROKE;
+        thumbCtx.stroke();
+        thumbCtx.restore();
+
+        // Update UI
+        el.dwellThumbnailPlaceholder.style.display = "none";
+        el.dwellThumbnailCanvas.style.display = "block";
+
+        el.dwellMetaStatus.textContent = "Triggered (Beeped)";
+        el.dwellMetaTarget.textContent = `${hand} Index`;
+        el.dwellMetaCoords.textContent = `(${Math.round(x)}, ${Math.round(y)})`;
+        el.dwellMetaThumbDist.textContent = thumbDistStr;
+        el.dwellMetaMiddleDist.textContent = middleDistStr;
+        el.dwellMetaTime.textContent = timeStr;
       }
 
       // ---------- YOLO WebSocket Pipeline ----------
@@ -771,6 +1075,7 @@
         const scaleX = el.canvas.width / yoloTargetSize;
         const scaleY = el.canvas.height / yoloTargetSize;
 
+        // Render YOLO Puck Detections
         latestYoloDetections.forEach(({ box: [x1, y1, x2, y2], score, class_id, persisted }) => {
           const [bx, by, bw, bh] = [x1 * scaleX, y1 * scaleY, (x2 - x1) * scaleX, (y2 - y1) * scaleY];
           const color = YOLO_COLORS[class_id] || "#00ff00";
@@ -786,16 +1091,72 @@
           ctx.fillText(tag, bx + 1, by > 12 ? by - 3 : by + 12);
         });
 
-        latestMpDetections.forEach(({ normX, normY, hand, score }) => {
-          const x = normX * el.canvas.width;
-          const y = normY * el.canvas.height;
+        // Render MediaPipe Hand Landmarks: Lines from thumb & middle to index, and index marker
+        latestMpHandTuples.forEach(({ hand, score, indexNormX, indexNormY, thumbNormX, thumbNormY, middleNormX, middleNormY }) => {
+          const ix = indexNormX * el.canvas.width;
+          const iy = indexNormY * el.canvas.height;
           const color = HAND_COLORS[hand] || "#00ff00";
 
+          const hasThumb = thumbNormX !== null && thumbNormY !== null;
+          const tx = hasThumb ? thumbNormX * el.canvas.width : 0;
+          const ty = hasThumb ? thumbNormY * el.canvas.height : 0;
+          const thumbDist = hasThumb ? Math.hypot(ix - tx, iy - ty) : 0;
+
+          const hasMiddle = middleNormX !== null && middleNormY !== null;
+          const mx = hasMiddle ? middleNormX * el.canvas.width : 0;
+          const my = hasMiddle ? middleNormY * el.canvas.height : 0;
+          const middleDist = hasMiddle ? Math.hypot(ix - mx, iy - my) : 0;
+
+          // Both thumb and middle finger must reach minimum distance (45px)
+          const isBothAboveThreshold = hasThumb && hasMiddle && thumbDist > MIN_INDEX_FINGER_DISTANCE && middleDist > MIN_INDEX_FINGER_DISTANCE;
+
+          // 1. Draw line originating from thumb to index (no dot at thumb)
+          if (hasThumb) {
+            ctx.beginPath();
+            ctx.moveTo(tx, ty);
+            ctx.lineTo(ix, iy);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Label on thumb line: "Thumb _px"
+            const midX = (tx + ix) / 2;
+            const midY = (ty + iy) / 2;
+            ctx.fillStyle = color;
+            ctx.fillText(`Thumb ${Math.round(thumbDist)}px`, midX + 6, midY - 4);
+          }
+
+          // 2. Draw line originating from middle finger to index (no dot at middle finger)
+          if (hasMiddle) {
+            ctx.beginPath();
+            ctx.moveTo(mx, my);
+            ctx.lineTo(ix, iy);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Label on middle line: "Middle _px"
+            const midX = (mx + ix) / 2;
+            const midY = (my + iy) / 2;
+            ctx.fillStyle = color;
+            ctx.fillText(`Middle ${Math.round(middleDist)}px`, midX + 6, midY + 12);
+          }
+
+          // 3. Draw Index marker: solid dot if both above threshold, hollow if either below/equal
           ctx.beginPath();
-          ctx.arc(x, y, 6, 0, 2 * Math.PI);
+          ctx.arc(ix, iy, 6, 0, 2 * Math.PI);
+          if (isBothAboveThreshold) {
+            ctx.fillStyle = color;
+            ctx.fill();
+          } else {
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = color;
+            ctx.stroke();
+          }
+
+          // Index finger label
           ctx.fillStyle = color;
-          ctx.fill();
-          ctx.fillText(`${hand} ${(score * 100).toFixed(0)}%`, x + 8, y > 12 ? y - 3 : y + 12);
+          ctx.fillText(`${hand} ${(score * 100).toFixed(0)}%`, ix + 8, iy > 12 ? iy - 3 : iy + 12);
         });
 
         updateDetectionsTable();
@@ -893,9 +1254,12 @@
         mediaStream = null;
         el.video.srcObject = null;
         latestMpDetections = [];
+        latestMpHandTuples = [];
         latestYoloDetections = [];
         lastKnownPucks.clear();
         resetAllFilters();
+        resetFingerDwell("Left");
+        resetFingerDwell("Right");
 
         setCameraControls(false);
         log("Camera stream stopped.");
@@ -908,7 +1272,15 @@
 
       const filterParams = () => [parseFloat(el.filterMinCutoff.value), parseFloat(el.filterBeta.value)];
 
-      const allFilters = () => [fingerFilters.Left, fingerFilters.Right, ...boxFilters.values()];
+      const allFilters = () => [
+        fingerFilters.Left,
+        fingerFilters.Right,
+        thumbFilters.Left,
+        thumbFilters.Right,
+        middleFilters.Left,
+        middleFilters.Right,
+        ...boxFilters.values(),
+      ];
 
       const resetAllFilters = () => allFilters().forEach((f) => f.reset());
 
@@ -977,6 +1349,17 @@
       el.refreshCamerasBtn.addEventListener("click", scanCameras);
       el.startCamBtn.addEventListener("click", startCamera);
       el.stopCamBtn.addEventListener("click", stopCamera);
+
+      // Unlock AudioContext on user interaction if needed
+      window.addEventListener(
+        "pointerdown",
+        () => {
+          if (audioCtx && audioCtx.state === "suspended") {
+            audioCtx.resume();
+          }
+        },
+        { once: true },
+      );
 
       // Startup
       await initMediaPipe();
