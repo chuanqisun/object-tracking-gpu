@@ -379,7 +379,9 @@
       const YOLO_COLORS = { 0: "#0066ff", 1: "#ff007f" };
       const AUDIO_TRACKS = { blue: ["assets/blue-01.mp3", "assets/blue-02.mp3"], pink: ["assets/pink-01.mp3", "assets/pink-02.mp3"] };
       const PUCK_SINK_LABELS = { blue: "BluePuck", pink: "PinkPuck" };
-      const PUCK_VOLUME = 0.5; // 50% volume for puck speakers
+      const PUCK_VOLUME = 0.05; // % volume for puck speakers
+      const KEEPALIVE_FREQ_HZ = 30; // Imperceptible tone frequency
+      const KEEPALIVE_GAIN = 0.001; // Inaudible level to prevent BLE speaker power save
 
       const $ = (id) => document.getElementById(id);
       const el = Object.fromEntries(
@@ -782,7 +784,7 @@
         return (await fetch(path)).arrayBuffer();
       }
 
-      // Per-puck audio routing: { blue: { ctx, gain, sinkLabel }, pink: {...} }
+      // Per-puck audio routing: { blue: { ctx, gain, keepAliveOsc, sinkLabel }, pink: {...} }
       const puckAudioOutputs = { blue: null, pink: null };
 
       async function scanPuckOutputDevices() {
@@ -827,7 +829,20 @@
         const gain = audioCtx.createGain();
         gain.gain.value = PUCK_VOLUME;
         gain.connect(audioCtx.destination);
-        return { ctx: audioCtx, gain, sinkLabel };
+
+        // Keep-alive: continuous imperceptible tone so BLE speakers never
+        // power-save/sleep. Routed on its own gain, parallel to the clip path;
+        // actual clips are overlaid (mixed) on top of it at the destination.
+        const keepAliveOsc = audioCtx.createOscillator();
+        keepAliveOsc.type = "sine";
+        keepAliveOsc.frequency.value = KEEPALIVE_FREQ_HZ;
+        const keepAliveGain = audioCtx.createGain();
+        keepAliveGain.gain.value = KEEPALIVE_GAIN;
+        keepAliveOsc.connect(keepAliveGain);
+        keepAliveGain.connect(audioCtx.destination);
+        keepAliveOsc.start();
+
+        return { ctx: audioCtx, gain, keepAliveOsc, sinkLabel };
       }
 
       async function loadAudioTracks() {
@@ -843,7 +858,7 @@
 
             // Decode buffers in the context that will play them
             audioBuffers[type] = await Promise.all(AUDIO_TRACKS[type].map((path) => getAudioArrayBuffer(path).then((ab) => output.ctx.decodeAudioData(ab))));
-            log(`Audio: ${type} tracks loaded -> ${output.sinkLabel} @ ${PUCK_VOLUME * 100}%.`);
+            log(`Audio: ${type} tracks loaded -> ${output.sinkLabel} @ ${PUCK_VOLUME * 100}% (keep-alive tone active).`);
           }
 
           audioLoaded = true;
