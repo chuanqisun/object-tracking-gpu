@@ -15,6 +15,7 @@
         --bg-head: #f5f5f5;
         --fg: #111;
         --muted: #666;
+        --ok: #008800;
         --gap: 0.5rem;
         --radius: 2px;
       }
@@ -32,6 +33,10 @@
         background: var(--bg);
         padding: var(--gap);
         line-height: 1.4;
+      }
+
+      .mono {
+        font-family: var(--font-mono);
       }
 
       header {
@@ -102,6 +107,10 @@
         > * {
           flex: 1;
         }
+
+        > .fixed {
+          flex: 0 0 auto;
+        }
       }
 
       label {
@@ -132,6 +141,15 @@
         gap: 2px;
         font-family: var(--font-mono);
         text-align: center;
+
+        &.cols-1 {
+          grid-template-columns: 1fr;
+          margin-top: 2px;
+        }
+
+        &.cols-4 {
+          grid-template-columns: repeat(4, 1fr);
+        }
 
         .metric-box {
           border: 1px solid var(--border);
@@ -181,6 +199,16 @@
             top: 0;
           }
 
+          th.num,
+          td.num {
+            text-align: right;
+          }
+
+          td.coords {
+            text-align: right;
+            color: var(--muted);
+          }
+
           tr:not(:last-child) {
             border-bottom: 1px solid var(--border-soft);
           }
@@ -220,7 +248,7 @@
     <header>
       <h1>Unified Tracking Console</h1>
       <div class="status-indicators">
-        <span id="filterStatus" style="color: #008800">[1€ FILTER: ON]</span>
+        <span id="filterStatus" style="color: var(--ok)">[1€ FILTER: ON]</span>
         <span id="mpStatus">[MP: INIT]</span>
         <span id="yoloStatus">[YOLO: DISCONNECTED]</span>
       </div>
@@ -228,28 +256,26 @@
 
     <main class="layout">
       <div class="sidebar">
-        <!-- Camera Control (Shared) -->
         <fieldset>
           <legend>Camera (Shared Source)</legend>
           <div class="row">
             <select id="cameraSelect">
               <option value="">-- Scan Devices --</option>
             </select>
-            <button id="refreshCamerasBtn" style="flex: 0 0 auto">Scan</button>
+            <button id="refreshCamerasBtn" class="fixed">Scan</button>
           </div>
           <div class="row">
             <button id="startCamBtn" disabled>Start</button>
             <button id="stopCamBtn" disabled>Stop</button>
           </div>
-          <div class="metrics-grid" style="grid-template-columns: 1fr; margin-top: 2px">
+          <div class="metrics-grid cols-1">
             <div class="metric-box">
               <span class="metric-label">CAMERA FPS</span>
-              <span class="metric-val" id="camFpsStat">0.0</span>
+              <span class="metric-val" id="camFps">0.0</span>
             </div>
           </div>
         </fieldset>
 
-        <!-- 1 Euro Filter Settings -->
         <fieldset>
           <legend>1€ Filter (Jitter Reduction)</legend>
           <label for="filterEnabled">
@@ -258,18 +284,17 @@
           </label>
           <label for="filterMinCutoff">
             <span>Min Cutoff (fc_min)</span>
-            <span id="filterMinCutoffVal" style="font-family: var(--font-mono)">4.0 Hz</span>
+            <span id="filterMinCutoffVal" class="mono">4.0 Hz</span>
           </label>
           <input type="range" id="filterMinCutoff" min="0.1" max="10.0" step="0.1" value="4.0" />
 
           <label for="filterBeta">
             <span>Speed Coeff (Beta)</span>
-            <span id="filterBetaVal" style="font-family: var(--font-mono)">0.007</span>
+            <span id="filterBetaVal" class="mono">0.007</span>
           </label>
           <input type="range" id="filterBeta" min="0.001" max="0.1" step="0.001" value="0.007" />
         </fieldset>
 
-        <!-- MediaPipe Config & Metrics -->
         <fieldset>
           <legend>MediaPipe (Index Finger)</legend>
           <div class="row">
@@ -277,7 +302,7 @@
           </div>
           <label for="mpConfThres">
             <span>Confidence Threshold</span>
-            <span id="mpConfValue" style="font-family: var(--font-mono)">0.50</span>
+            <span id="mpConfValue" class="mono">0.50</span>
           </label>
           <input type="range" id="mpConfThres" min="0.05" max="0.95" step="0.05" value="0.50" />
 
@@ -288,7 +313,6 @@
           </div>
         </fieldset>
 
-        <!-- YOLO Config & Metrics -->
         <fieldset>
           <legend>YOLO26 (Pucks via WebSocket)</legend>
           <input type="text" id="wsUrl" placeholder="ws://localhost:18888/ws" />
@@ -298,11 +322,11 @@
           </div>
           <label for="yoloConfThres">
             <span>Confidence Threshold</span>
-            <span id="yoloConfValue" style="font-family: var(--font-mono)">0.25</span>
+            <span id="yoloConfValue" class="mono">0.25</span>
           </label>
           <input type="range" id="yoloConfThres" min="0.05" max="0.95" step="0.05" value="0.25" />
 
-          <div class="metrics-grid" style="grid-template-columns: repeat(4, 1fr)">
+          <div class="metrics-grid cols-4">
             <div class="metric-box"><span class="metric-label">FPS</span><span class="metric-val" id="yoloFps">0.0</span></div>
             <div class="metric-box"><span class="metric-label">INFER</span><span class="metric-val" id="yoloInfer">0ms</span></div>
             <div class="metric-box"><span class="metric-label">RTT</span><span class="metric-val" id="yoloRtt">0ms</span></div>
@@ -310,7 +334,6 @@
           </div>
         </fieldset>
 
-        <!-- Unified Detection Feed -->
         <fieldset>
           <legend>Active Detections</legend>
           <div class="detections-table-container">
@@ -318,8 +341,8 @@
               <thead>
                 <tr>
                   <th>Model / Item</th>
-                  <th style="text-align: right">Score</th>
-                  <th style="text-align: right">Coordinates</th>
+                  <th class="num">Score</th>
+                  <th class="num">Coordinates</th>
                 </tr>
               </thead>
               <tbody id="detectionsList">
@@ -331,7 +354,6 @@
           </div>
         </fieldset>
 
-        <!-- System Logs -->
         <fieldset>
           <legend>Logs</legend>
           <div id="logPanel">Ready.</div>
@@ -349,30 +371,24 @@
     <script type="module">
       import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
 
-      // ==========================================
-      // 1 Euro Filter Implementation (Casiez et al.)
-      // ==========================================
-      class LowPassFilter {
-        constructor(alpha = 0) {
-          this.setAlpha(alpha);
-          this.s = null;
-        }
+      // ---------- Constants ----------
+      const TARGET_SIZE = 640;
+      const JPEG_QUALITY = 0.75;
+      const DEFAULT_PORT = "18888";
+      const INDEX_FINGER_TIP = 8;
+      const MAX_IN_FLIGHT = 2;
+      const MAX_BUFFERED_BYTES = 256 * 1024;
 
-        setAlpha(alpha) {
-          this.alpha = Math.max(0, Math.min(1, alpha));
-        }
+      const HAND_COLORS = { Left: "#0066ff", Right: "#ff007f" };
+      const YOLO_CLASSES = { 0: "blue puck", 1: "pink puck" };
+      const YOLO_COLORS = { 0: "#0066ff", 1: "#ff007f" };
+
+      // ---------- 1€ Filter (Casiez et al.) ----------
+      class LowPassFilter {
+        s = null;
 
         filter(value, alpha) {
-          if (alpha !== undefined) this.setAlpha(alpha);
-          if (this.s === null) {
-            this.s = value;
-          } else {
-            this.s = this.alpha * value + (1.0 - this.alpha) * this.s;
-          }
-          return this.s;
-        }
-
-        lastValue() {
+          this.s = this.s === null ? value : alpha * value + (1 - alpha) * this.s;
           return this.s;
         }
 
@@ -383,46 +399,41 @@
 
       class OneEuroFilter {
         constructor(minCutoff = 4.0, beta = 0.007, dCutoff = 1.0) {
-          this.minCutoff = minCutoff;
-          this.beta = beta;
-          this.dCutoff = dCutoff;
+          this.setParameters(minCutoff, beta, dCutoff);
           this.x = new LowPassFilter();
           this.dx = new LowPassFilter();
           this.lastTime = null;
         }
 
         setParameters(minCutoff, beta, dCutoff = 1.0) {
-          this.minCutoff = minCutoff;
-          this.beta = beta;
-          this.dCutoff = dCutoff;
+          Object.assign(this, { minCutoff, beta, dCutoff });
         }
 
         alpha(rate, cutoff) {
-          const tau = 1.0 / (2 * Math.PI * cutoff);
-          const te = 1.0 / rate;
-          return 1.0 / (1.0 + tau / te);
+          const tau = 1 / (2 * Math.PI * cutoff);
+          return 1 / (1 + tau * rate);
         }
 
         filter(val, timestamp) {
           if (this.lastTime === null) {
             this.lastTime = timestamp;
-            return this.x.filter(val, 1.0);
+            return this.x.filter(val, 1);
           }
 
-          const dt = (timestamp - this.lastTime) / 1000.0;
+          const dt = (timestamp - this.lastTime) / 1000;
           this.lastTime = timestamp;
 
-          // If tracking gap is too big (>1s), reset smoother state to avoid long lag jumps
-          if (dt > 1.0) {
+          // Tracking gap too big (>1s): reset smoother state to avoid long lag jumps
+          if (dt > 1) {
             this.reset();
             this.lastTime = timestamp;
-            return this.x.filter(val, 1.0);
+            return this.x.filter(val, 1);
           }
 
-          if (dt <= 0) return this.x.lastValue() ?? val;
+          if (dt <= 0) return this.x.s ?? val;
 
-          const rate = 1.0 / dt;
-          const prevX = this.x.lastValue();
+          const rate = 1 / dt;
+          const prevX = this.x.s;
           const dx = prevX === null ? 0 : (val - prevX) * rate;
           const edx = this.dx.filter(dx, this.alpha(rate, this.dCutoff));
           const cutoff = this.minCutoff + this.beta * Math.abs(edx);
@@ -436,173 +447,94 @@
         }
       }
 
-      // Point Filter (2 points: X and Y)
-      class Point2DFilter {
-        constructor(minCutoff = 4.0, beta = 0.007) {
-          this.fx = new OneEuroFilter(minCutoff, beta);
-          this.fy = new OneEuroFilter(minCutoff, beta);
+      class MultiFilter {
+        constructor(count, minCutoff = 4.0, beta = 0.007) {
+          this.filters = Array.from({ length: count }, () => new OneEuroFilter(minCutoff, beta));
         }
 
         setParameters(minCutoff, beta) {
-          this.fx.setParameters(minCutoff, beta);
-          this.fy.setParameters(minCutoff, beta);
+          this.filters.forEach((f) => f.setParameters(minCutoff, beta));
         }
 
-        filter(x, y, timestamp) {
-          return [this.fx.filter(x, timestamp), this.fy.filter(y, timestamp)];
-        }
-
-        reset() {
-          this.fx.reset();
-          this.fy.reset();
-        }
-      }
-
-      // Box Filter (4 coordinates: [x1, y1, x2, y2])
-      class Box4DFilter {
-        constructor(minCutoff = 4.0, beta = 0.007) {
-          this.fx1 = new OneEuroFilter(minCutoff, beta);
-          this.fy1 = new OneEuroFilter(minCutoff, beta);
-          this.fx2 = new OneEuroFilter(minCutoff, beta);
-          this.fy2 = new OneEuroFilter(minCutoff, beta);
-        }
-
-        setParameters(minCutoff, beta) {
-          this.fx1.setParameters(minCutoff, beta);
-          this.fy1.setParameters(minCutoff, beta);
-          this.fx2.setParameters(minCutoff, beta);
-          this.fy2.setParameters(minCutoff, beta);
-        }
-
-        filter(x1, y1, x2, y2, timestamp) {
-          return [this.fx1.filter(x1, timestamp), this.fy1.filter(y1, timestamp), this.fx2.filter(x2, timestamp), this.fy2.filter(y2, timestamp)];
+        filter(values, timestamp) {
+          return values.map((v, i) => this.filters[i].filter(v, timestamp));
         }
 
         reset() {
-          this.fx1.reset();
-          this.fy1.reset();
-          this.fx2.reset();
-          this.fy2.reset();
+          this.filters.forEach((f) => f.reset());
         }
       }
 
-      // ---------- Constants ----------
-      const TARGET_SIZE = 640;
-      const JPEG_QUALITY = 0.75;
-      const DEFAULT_PORT = "18888";
-      const INDEX_FINGER_TIP = 8;
-      const MAX_IN_FLIGHT = 2;
-      const MAX_BUFFERED_BYTES = 256 * 1024;
-
-      const HAND_COLORS = {
-        Left: "#0066ff", // Blue (matches blue puck styling)
-        Right: "#ff007f", // Pink (matches pink puck styling)
-      };
-
-      const YOLO_CLASSES = { 0: "blue puck", 1: "pink puck" };
-      const YOLO_COLORS = { 0: "#0066ff", 1: "#ff007f" };
-
-      const $ = (id) => document.getElementById(id);
-      const el = {
-        // Status & Controls
-        filterStatus: $("filterStatus"),
-        mpStatus: $("mpStatus"),
-        yoloStatus: $("yoloStatus"),
-        cameraSelect: $("cameraSelect"),
-        refreshCamerasBtn: $("refreshCamerasBtn"),
-        startCamBtn: $("startCamBtn"),
-        stopCamBtn: $("stopCamBtn"),
-        reloadMpBtn: $("reloadMpBtn"),
-        wsUrl: $("wsUrl"),
-        connectYoloBtn: $("connectYoloBtn"),
-        disconnectYoloBtn: $("disconnectYoloBtn"),
-
-        // 1€ Filter Controls
-        filterEnabled: $("filterEnabled"),
-        filterMinCutoff: $("filterMinCutoff"),
-        filterMinCutoffVal: $("filterMinCutoffVal"),
-        filterBeta: $("filterBeta"),
-        filterBetaVal: $("filterBetaVal"),
-
-        // Configs
-        mpConfThres: $("mpConfThres"),
-        mpConfValue: $("mpConfValue"),
-        yoloConfThres: $("yoloConfThres"),
-        yoloConfValue: $("yoloConfValue"),
-
-        // Camera Metrics
-        camFps: $("camFpsStat"),
-
-        // MediaPipe Metrics
-        mpFps: $("mpFps"),
-        mpInfer: $("mpInfer"),
-        mpSkip: $("mpSkip"),
-
-        // YOLO Metrics
-        yoloFps: $("yoloFps"),
-        yoloInfer: $("yoloInfer"),
-        yoloRtt: $("yoloRtt"),
-        yoloSkip: $("yoloSkip"),
-
-        // UI Outputs
-        detectionsList: $("detectionsList"),
-        logPanel: $("logPanel"),
-        video: $("webcam"),
-        canvas: $("outputCanvas"),
-      };
+      // ---------- DOM ----------
+      const el = Object.fromEntries(
+        [
+          "filterStatus",
+          "mpStatus",
+          "yoloStatus",
+          "cameraSelect",
+          "refreshCamerasBtn",
+          "startCamBtn",
+          "stopCamBtn",
+          "reloadMpBtn",
+          "wsUrl",
+          "connectYoloBtn",
+          "disconnectYoloBtn",
+          "filterEnabled",
+          "filterMinCutoff",
+          "filterMinCutoffVal",
+          "filterBeta",
+          "filterBetaVal",
+          "mpConfThres",
+          "mpConfValue",
+          "yoloConfThres",
+          "yoloConfValue",
+          "camFps",
+          "mpFps",
+          "mpInfer",
+          "mpSkip",
+          "yoloFps",
+          "yoloInfer",
+          "yoloRtt",
+          "yoloSkip",
+          "detectionsList",
+          "logPanel",
+        ].map((id) => [id, document.getElementById(id)]),
+      );
+      el.video = document.getElementById("webcam");
+      el.canvas = document.getElementById("outputCanvas");
 
       const ctx = el.canvas.getContext("2d");
-
-      // Shared offscreen canvas for zero-allocation frame grabs
       const offscreen = Object.assign(document.createElement("canvas"), { width: TARGET_SIZE, height: TARGET_SIZE });
       const offscreenCtx = offscreen.getContext("2d", { willReadFrequently: false });
 
-      // ---------- State & Filter Allocations ----------
+      // ---------- State ----------
       let mediaStream = null;
       let isStreaming = false;
 
-      // Point Filters for Finger tracking (Up to two points: Left and Right index fingers)
-      const fingerFilters = {
-        Left: new Point2DFilter(4.0, 0.007),
-        Right: new Point2DFilter(4.0, 0.007),
+      const fingerFilters = { Left: new MultiFilter(2), Right: new MultiFilter(2) };
+      const boxFilters = new Map();
+      const lastKnownPucks = new Map();
+
+      const fpsCounters = {};
+      const trackFps = (name, target) => {
+        const c = (fpsCounters[name] ??= { count: 0, windowStart: performance.now() });
+        c.count++;
+        const now = performance.now();
+        if (now - c.windowStart >= 1000) {
+          target.textContent = ((c.count * 1000) / (now - c.windowStart)).toFixed(1);
+          c.count = 0;
+          c.windowStart = now;
+        }
       };
 
-      // Box Filters for Bounding Boxes (Up to 4 points / coordinates per box)
-      const boxFilters = new Map();
-
-      function getBoxFilter(classId) {
-        if (!boxFilters.has(classId)) {
-          const minCutoff = parseFloat(el.filterMinCutoff.value);
-          const beta = parseFloat(el.filterBeta.value);
-          boxFilters.set(classId, new Box4DFilter(minCutoff, beta));
-        }
-        return boxFilters.get(classId);
-      }
-
-      function updateAllFilterParams() {
-        const minCutoff = parseFloat(el.filterMinCutoff.value);
-        const beta = parseFloat(el.filterBeta.value);
-        fingerFilters.Left.setParameters(minCutoff, beta);
-        fingerFilters.Right.setParameters(minCutoff, beta);
-        boxFilters.forEach((filter) => filter.setParameters(minCutoff, beta));
-      }
-
-      // FPS Trackers
-      let camFrameCount = 0,
-        camFpsWindow = performance.now();
-      let mpFrameCount = 0,
-        mpFpsWindow = performance.now();
-      let yoloFrameCount = 0,
-        yoloFpsWindow = performance.now();
-
-      // MediaPipe Pipeline State
+      // MediaPipe pipeline state
       let handLandmarker = null;
       let isMpInferencing = false;
       let mpSkippedFrames = 0;
       let lastMpVideoTime = -1;
       let latestMpDetections = [];
 
-      // YOLO Pipeline State
+      // YOLO pipeline state
       let ws = null;
       let yoloInFlight = 0;
       let isYoloEncoding = false;
@@ -610,8 +542,20 @@
       let latestYoloDetections = [];
       let yoloTargetSize = TARGET_SIZE;
 
-      // Last known puck positions by class_id
-      const lastKnownPucks = new Map();
+      // ---------- Shared Video Loop ----------
+      function startCaptureLoop() {
+        const scheduleNext = () => isStreaming && (el.video.requestVideoFrameCallback?.(onFrame) ?? requestAnimationFrame(onFrame));
+
+        const onFrame = () => {
+          if (!isStreaming) return;
+          trackFps("cam", el.camFps);
+          stepMediaPipe();
+          stepYolo();
+          scheduleNext();
+        };
+
+        scheduleNext();
+      }
 
       // ---------- MediaPipe Pipeline ----------
       async function initMediaPipe() {
@@ -619,6 +563,7 @@
         log("MediaPipe: Loading Hand Landmarker...");
         try {
           const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm");
+          const conf = parseFloat(el.mpConfThres.value);
 
           handLandmarker = await HandLandmarker.createFromOptions(vision, {
             baseOptions: {
@@ -627,8 +572,8 @@
             },
             runningMode: "VIDEO",
             numHands: 2,
-            minHandDetectionConfidence: parseFloat(el.mpConfThres.value),
-            minHandPresenceConfidence: parseFloat(el.mpConfThres.value),
+            minHandDetectionConfidence: conf,
+            minHandPresenceConfidence: conf,
             minTrackingConfidence: 0.5,
           });
 
@@ -645,8 +590,7 @@
         if (!isStreaming || !handLandmarker || el.video.readyState < 2) return;
 
         if (isMpInferencing) {
-          mpSkippedFrames++;
-          el.mpSkip.textContent = mpSkippedFrames;
+          el.mpSkip.textContent = ++mpSkippedFrames;
           return;
         }
 
@@ -658,8 +602,7 @@
 
         try {
           const results = handLandmarker.detectForVideo(el.video, performance.now());
-          const inferDuration = performance.now() - start;
-          handleMpResult(results, inferDuration);
+          handleMpResult(results, performance.now() - start);
         } catch (e) {
           log(`MediaPipe Infer Error: ${e.message}`);
         } finally {
@@ -668,63 +611,34 @@
       }
 
       function handleMpResult(results, inferDuration) {
-        updateMpFps();
+        trackFps("mp", el.mpFps);
         el.mpInfer.textContent = `${inferDuration.toFixed(1)}ms`;
 
-        const detections = [];
         const confThres = parseFloat(el.mpConfThres.value);
-        const now = performance.now();
         const filterOn = el.filterEnabled.checked;
+        const now = performance.now();
         const activeHands = new Set();
+        const detections = [];
 
-        if (results.landmarks && results.landmarks.length > 0) {
-          results.landmarks.forEach((landmarks, index) => {
-            const handedness = results.handednesses?.[index]?.[0];
-            const label = handedness?.categoryName || (index === 0 ? "Left" : "Right");
-            const score = handedness?.score ?? 1.0;
+        (results.landmarks || []).forEach((landmarks, index) => {
+          const handedness = results.handednesses?.[index]?.[0];
+          const hand = handedness?.categoryName || (index === 0 ? "Left" : "Right");
+          const score = handedness?.score ?? 1.0;
+          const tip = landmarks[INDEX_FINGER_TIP];
+          if (score < confThres || !tip) return;
 
-            if (score >= confThres && landmarks[INDEX_FINGER_TIP]) {
-              const tip = landmarks[INDEX_FINGER_TIP];
-              activeHands.add(label);
+          activeHands.add(hand);
+          const [normX, normY] = filterOn && fingerFilters[hand] ? fingerFilters[hand].filter([tip.x, tip.y], now) : [tip.x, tip.y];
 
-              let normX = tip.x;
-              let normY = tip.y;
+          detections.push({ type: "hand", label: `${hand} Index`, hand, score, normX, normY });
+        });
 
-              // Apply 1 Euro Filter to index fingertip coordinates
-              if (filterOn && fingerFilters[label]) {
-                const [filteredX, filteredY] = fingerFilters[label].filter(normX, normY, now);
-                normX = filteredX;
-                normY = filteredY;
-              }
-
-              detections.push({
-                type: "hand",
-                label: `${label} Index`,
-                hand: label,
-                score: score,
-                normX: normX,
-                normY: normY,
-              });
-            }
-          });
+        for (const hand of ["Left", "Right"]) {
+          if (!activeHands.has(hand)) fingerFilters[hand].reset();
         }
-
-        // Reset filter if hand left frame
-        if (!activeHands.has("Left")) fingerFilters.Left.reset();
-        if (!activeHands.has("Right")) fingerFilters.Right.reset();
 
         latestMpDetections = detections;
         renderOverlay();
-      }
-
-      function updateMpFps() {
-        mpFrameCount++;
-        const now = performance.now();
-        if (now - mpFpsWindow >= 1000) {
-          el.mpFps.textContent = ((mpFrameCount * 1000) / (now - mpFpsWindow)).toFixed(1);
-          mpFrameCount = 0;
-          mpFpsWindow = now;
-        }
       }
 
       // ---------- YOLO WebSocket Pipeline ----------
@@ -782,13 +696,11 @@
         if (!isStreaming || ws?.readyState !== WebSocket.OPEN || el.video.readyState < 2) return;
 
         if (isYoloEncoding || yoloInFlight >= MAX_IN_FLIGHT || ws.bufferedAmount > MAX_BUFFERED_BYTES) {
-          yoloClientSkip++;
-          el.yoloSkip.textContent = yoloClientSkip;
+          el.yoloSkip.textContent = ++yoloClientSkip;
           return;
         }
 
         isYoloEncoding = true;
-        // Efficiently draw the active video to offscreen buffer
         offscreenCtx.drawImage(el.video, 0, 0, TARGET_SIZE, TARGET_SIZE);
         offscreen.toBlob(
           (blob) => {
@@ -806,7 +718,7 @@
       }
 
       function handleYoloResult(data, rtt) {
-        updateYoloFps();
+        trackFps("yolo", el.yoloFps);
         el.yoloInfer.textContent = `${(data.infer_ms || 0).toFixed(1)}ms`;
         el.yoloRtt.textContent = `${rtt}ms`;
         el.yoloSkip.textContent = yoloClientSkip + (data.dropped_total || 0);
@@ -815,105 +727,35 @@
         const confThres = parseFloat(el.yoloConfThres.value);
         const filterOn = el.filterEnabled.checked;
         const now = performance.now();
-
-        const rawDetections = (data.detections || []).filter((d) => d.score >= confThres);
         const seenClassIds = new Set();
 
-        const activeDetections = rawDetections.map((det) => {
-          let [x1, y1, x2, y2] = det.box;
-          if (x2 < x1 || y2 < y1) [x1, y1, x2, y2] = cxcywhToXyxy(x1, y1, x2, y2);
+        const detections = (data.detections || [])
+          .filter((d) => d.score >= confThres)
+          .map(({ box, score, class_id }) => {
+            let [x1, y1, x2, y2] = box;
+            if (x2 < x1 || y2 < y1) [x1, y1, x2, y2] = cxcywhToXyxy(x1, y1, x2, y2);
 
-          seenClassIds.add(det.class_id);
+            seenClassIds.add(class_id);
+            if (filterOn) [x1, y1, x2, y2] = getBoxFilter(class_id).filter([x1, y1, x2, y2], now);
 
-          // Apply 1 Euro Filter to the 4 bounding box corner coordinates
-          if (filterOn) {
-            const bFilter = getBoxFilter(det.class_id);
-            [x1, y1, x2, y2] = bFilter.filter(x1, y1, x2, y2, now);
-          }
+            const label = YOLO_CLASSES[class_id] || `id:${class_id}`;
+            lastKnownPucks.set(class_id, { box: [x1, y1, x2, y2], score, label });
 
-          const detectionObj = {
-            type: "puck",
-            class_id: det.class_id,
-            label: YOLO_CLASSES[det.class_id] || `id:${det.class_id}`,
-            score: det.score,
-            box: [x1, y1, x2, y2],
-            persisted: false,
-          };
-
-          // Store/update last known position
-          lastKnownPucks.set(det.class_id, {
-            box: [x1, y1, x2, y2],
-            score: det.score,
-            label: detectionObj.label,
+            return { type: "puck", class_id, label, score, box: [x1, y1, x2, y2], persisted: false };
           });
 
-          return detectionObj;
-        });
-
         // Fill in missing pucks with their last known position
-        lastKnownPucks.forEach((info, classId) => {
-          if (!seenClassIds.has(classId)) {
-            activeDetections.push({
-              type: "puck",
-              class_id: classId,
-              label: info.label,
-              score: info.score,
-              box: [...info.box],
-              persisted: true,
-            });
+        lastKnownPucks.forEach(({ box, score, label }, class_id) => {
+          if (!seenClassIds.has(class_id)) {
+            detections.push({ type: "puck", class_id, label, score, box: [...box], persisted: true });
           }
         });
 
-        latestYoloDetections = activeDetections;
+        latestYoloDetections = detections;
         renderOverlay();
       }
 
-      function updateYoloFps() {
-        yoloFrameCount++;
-        const now = performance.now();
-        if (now - yoloFpsWindow >= 1000) {
-          el.yoloFps.textContent = ((yoloFrameCount * 1000) / (now - yoloFpsWindow)).toFixed(1);
-          yoloFrameCount = 0;
-          yoloFpsWindow = now;
-        }
-      }
-
-      // ---------- Shared Video Loop ----------
-      function startCaptureLoop() {
-        const onFrame = () => {
-          if (!isStreaming) return;
-          updateCamFps();
-
-          // Dispatch async frames to both models concurrently
-          stepMediaPipe();
-          stepYolo();
-
-          scheduleNext();
-        };
-
-        const scheduleNext = () => {
-          if (!isStreaming) return;
-          if (el.video.requestVideoFrameCallback) {
-            el.video.requestVideoFrameCallback(onFrame);
-          } else {
-            requestAnimationFrame(onFrame);
-          }
-        };
-
-        scheduleNext();
-      }
-
-      function updateCamFps() {
-        camFrameCount++;
-        const now = performance.now();
-        if (now - camFpsWindow >= 1000) {
-          el.camFps.textContent = ((camFrameCount * 1000) / (now - camFpsWindow)).toFixed(1);
-          camFrameCount = 0;
-          camFpsWindow = now;
-        }
-      }
-
-      // ---------- Unified Rendering ----------
+      // ---------- Rendering ----------
       function renderOverlay() {
         if (!isStreaming || el.video.readyState < 2) return;
 
@@ -922,39 +764,28 @@
         if (el.canvas.width !== targetW) el.canvas.width = targetW;
         if (el.canvas.height !== targetH) el.canvas.height = targetH;
 
-        // Draw webcam feed once per composite render
         ctx.drawImage(el.video, 0, 0, el.canvas.width, el.canvas.height);
+        ctx.font = "11px monospace";
+        ctx.textAlign = "left";
 
-        // 1. Draw YOLO detections (Boxes)
         const scaleX = el.canvas.width / yoloTargetSize;
         const scaleY = el.canvas.height / yoloTargetSize;
 
-        latestYoloDetections.forEach(({ box, score, class_id, persisted }) => {
-          const [x1, y1, x2, y2] = box;
-          const boxX = x1 * scaleX;
-          const boxY = y1 * scaleY;
-          const boxW = (x2 - x1) * scaleX;
-          const boxH = (y2 - y1) * scaleY;
+        latestYoloDetections.forEach(({ box: [x1, y1, x2, y2], score, class_id, persisted }) => {
+          const [bx, by, bw, bh] = [x1 * scaleX, y1 * scaleY, (x2 - x1) * scaleX, (y2 - y1) * scaleY];
           const color = YOLO_COLORS[class_id] || "#00ff00";
 
           ctx.strokeStyle = color;
           ctx.lineWidth = 1.5;
-          if (persisted) {
-            ctx.setLineDash([4, 3]);
-          } else {
-            ctx.setLineDash([]);
-          }
-          ctx.strokeRect(boxX, boxY, boxW, boxH);
-          ctx.setLineDash([]); // Reset
+          ctx.setLineDash(persisted ? [4, 3] : []);
+          ctx.strokeRect(bx, by, bw, bh);
+          ctx.setLineDash([]);
 
-          ctx.font = "11px monospace";
           ctx.fillStyle = color;
-          ctx.textAlign = "left";
-          const tag = persisted ? `${(score * 100).toFixed(0)}% (last known)` : `${(score * 100).toFixed(0)}%`;
-          ctx.fillText(tag, boxX + 1, boxY > 12 ? boxY - 3 : boxY + 12);
+          const tag = `${(score * 100).toFixed(0)}%${persisted ? " (last known)" : ""}`;
+          ctx.fillText(tag, bx + 1, by > 12 ? by - 3 : by + 12);
         });
 
-        // 2. Draw MediaPipe detections (Fingertips)
         latestMpDetections.forEach(({ normX, normY, hand, score }) => {
           const x = normX * el.canvas.width;
           const y = normY * el.canvas.height;
@@ -964,45 +795,36 @@
           ctx.arc(x, y, 6, 0, 2 * Math.PI);
           ctx.fillStyle = color;
           ctx.fill();
-
-          ctx.font = "11px monospace";
-          ctx.fillStyle = color;
-          ctx.textAlign = "left";
           ctx.fillText(`${hand} ${(score * 100).toFixed(0)}%`, x + 8, y > 12 ? y - 3 : y + 12);
         });
 
-        // Update unified detections table
         updateDetectionsTable();
       }
 
       function updateDetectionsTable() {
-        const rows = [];
+        const row = (color, label, score, coords) => `
+          <tr>
+            <td style="color: ${color || "inherit"}">${label}</td>
+            <td class="num">${(score * 100).toFixed(1)}%</td>
+            <td class="coords">[${coords}]</td>
+          </tr>
+        `;
 
-        latestMpDetections.forEach((d) => {
-          const pxX = Math.round(d.normX * el.canvas.width);
-          const pxY = Math.round(d.normY * el.canvas.height);
-          rows.push(`
-            <tr>
-              <td style="color: ${HAND_COLORS[d.hand] || "inherit"}">${d.label}</td>
-              <td style="text-align: right">${(d.score * 100).toFixed(1)}%</td>
-              <td style="text-align: right; color: var(--muted)">[${pxX}, ${pxY}]</td>
-            </tr>
-          `);
-        });
+        const rows = [
+          ...latestMpDetections.map((d) =>
+            row(HAND_COLORS[d.hand], d.label, d.score, `${Math.round(d.normX * el.canvas.width)}, ${Math.round(d.normY * el.canvas.height)}`),
+          ),
+          ...latestYoloDetections.map((d) =>
+            row(
+              YOLO_COLORS[d.class_id],
+              d.persisted ? `${d.label} <span style="font-size: 8px; opacity: 0.7">(last known)</span>` : d.label,
+              d.score,
+              d.box.map(Math.round).join(", "),
+            ),
+          ),
+        ];
 
-        latestYoloDetections.forEach((d) => {
-          const formattedBox = d.box.map(Math.round).join(", ");
-          const labelTag = d.persisted ? `${d.label} <span style="font-size: 8px; opacity: 0.7">(last known)</span>` : d.label;
-          rows.push(`
-            <tr>
-              <td style="color: ${YOLO_COLORS[d.class_id] || "inherit"}">${labelTag}</td>
-              <td style="text-align: right">${(d.score * 100).toFixed(1)}%</td>
-              <td style="text-align: right; color: var(--muted)">[${formattedBox}]</td>
-            </tr>
-          `);
-        });
-
-        el.detectionsList.innerHTML = rows.length === 0 ? '<tr><td colspan="3" style="color: var(--muted)">0 active detections</td></tr>' : rows.join("");
+        el.detectionsList.innerHTML = rows.join("") || '<tr><td colspan="3" style="color: var(--muted)">0 active detections</td></tr>';
       }
 
       function drawNoSignal() {
@@ -1014,7 +836,7 @@
         ctx.fillText("NO SIGNAL", el.canvas.width / 2, el.canvas.height / 2);
       }
 
-      // ---------- Camera Devices ----------
+      // ---------- Camera ----------
       async function scanCameras() {
         try {
           if (!mediaStream && el.cameraSelect.options.length <= 1) {
@@ -1026,14 +848,13 @@
 
           const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
 
-          if (devices.length === 0) {
+          if (!devices.length) {
             el.cameraSelect.innerHTML = '<option value="">No cameras found</option>';
             el.startCamBtn.disabled = true;
             return;
           }
 
           el.cameraSelect.innerHTML = devices.map((d, i) => `<option value="${d.deviceId}">${d.label || `Camera ${i + 1}`}</option>`).join("");
-
           checkStartReadiness();
           log(`Found ${devices.length} camera(s).`);
         } catch (err) {
@@ -1041,24 +862,19 @@
         }
       }
 
-      function checkStartReadiness() {
-        if (el.cameraSelect.value || el.cameraSelect.options.length > 0) {
-          el.startCamBtn.disabled = false;
-        }
-      }
-
       async function startCamera() {
         const deviceId = el.cameraSelect.value;
-        const video = {
-          ...(deviceId && { deviceId: { exact: deviceId } }),
-          width: { ideal: TARGET_SIZE },
-          height: { ideal: TARGET_SIZE },
-          frameRate: { ideal: 60 },
-        };
 
         try {
           if (mediaStream) stopCamera();
-          mediaStream = await navigator.mediaDevices.getUserMedia({ video });
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              ...(deviceId && { deviceId: { exact: deviceId } }),
+              width: { ideal: TARGET_SIZE },
+              height: { ideal: TARGET_SIZE },
+              frameRate: { ideal: 60 },
+            },
+          });
           el.video.srcObject = mediaStream;
           await el.video.play();
 
@@ -1079,11 +895,7 @@
         latestMpDetections = [];
         latestYoloDetections = [];
         lastKnownPucks.clear();
-
-        // Reset all 1 Euro filters
-        fingerFilters.Left.reset();
-        fingerFilters.Right.reset();
-        boxFilters.forEach((f) => f.reset());
+        resetAllFilters();
 
         setCameraControls(false);
         log("Camera stream stopped.");
@@ -1093,6 +905,23 @@
 
       // ---------- Helpers ----------
       const cxcywhToXyxy = (cx, cy, w, h) => [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2];
+
+      const filterParams = () => [parseFloat(el.filterMinCutoff.value), parseFloat(el.filterBeta.value)];
+
+      const allFilters = () => [fingerFilters.Left, fingerFilters.Right, ...boxFilters.values()];
+
+      const resetAllFilters = () => allFilters().forEach((f) => f.reset());
+
+      const updateAllFilterParams = () => allFilters().forEach((f) => f.setParameters(...filterParams()));
+
+      function getBoxFilter(classId) {
+        if (!boxFilters.has(classId)) boxFilters.set(classId, new MultiFilter(4, ...filterParams()));
+        return boxFilters.get(classId);
+      }
+
+      const checkStartReadiness = () => {
+        if (el.cameraSelect.value || el.cameraSelect.options.length > 0) el.startCamBtn.disabled = false;
+      };
 
       const setCameraControls = (running) => {
         el.startCamBtn.disabled = running;
@@ -1118,15 +947,10 @@
       el.wsUrl.value = buildDefaultWsUrl();
       drawNoSignal();
 
-      // 1€ Filter Controls
-      el.filterEnabled.addEventListener("change", ({ target }) => {
-        el.filterStatus.textContent = target.checked ? "[1€ FILTER: ON]" : "[1€ FILTER: OFF]";
-        el.filterStatus.style.color = target.checked ? "#008800" : "var(--muted)";
-        if (!target.checked) {
-          fingerFilters.Left.reset();
-          fingerFilters.Right.reset();
-          boxFilters.forEach((f) => f.reset());
-        }
+      el.filterEnabled.addEventListener("change", ({ target: { checked } }) => {
+        el.filterStatus.textContent = checked ? "[1€ FILTER: ON]" : "[1€ FILTER: OFF]";
+        el.filterStatus.style.color = checked ? "var(--ok)" : "var(--muted)";
+        if (!checked) resetAllFilters();
       });
 
       el.filterMinCutoff.addEventListener("input", ({ target }) => {
@@ -1141,31 +965,22 @@
 
       el.mpConfThres.addEventListener("input", async ({ target }) => {
         el.mpConfValue.textContent = target.value;
-        if (handLandmarker) {
-          await handLandmarker.setOptions({
-            minHandDetectionConfidence: parseFloat(target.value),
-            minHandPresenceConfidence: parseFloat(target.value),
-          });
-        }
+        const conf = parseFloat(target.value);
+        await handLandmarker?.setOptions({ minHandDetectionConfidence: conf, minHandPresenceConfidence: conf });
       });
 
-      el.yoloConfThres.addEventListener("input", ({ target }) => {
-        el.yoloConfValue.textContent = target.value;
-      });
+      el.yoloConfThres.addEventListener("input", ({ target }) => (el.yoloConfValue.textContent = target.value));
 
       el.reloadMpBtn.addEventListener("click", initMediaPipe);
       el.connectYoloBtn.addEventListener("click", connectWebSocket);
       el.disconnectYoloBtn.addEventListener("click", () => ws?.close());
-
       el.refreshCamerasBtn.addEventListener("click", scanCameras);
       el.startCamBtn.addEventListener("click", startCamera);
       el.stopCamBtn.addEventListener("click", stopCamera);
 
       // Startup
-      (async () => {
-        await initMediaPipe();
-        await scanCameras();
-      })();
+      await initMediaPipe();
+      await scanCameras();
     </script>
   </body>
 </html>
