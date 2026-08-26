@@ -1,0 +1,986 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Unified Tracking Console (MediaPipe + YOLO26 + 1€ Filter)</title>
+    <style>
+      :root {
+        --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        --border: #ddd;
+        --border-soft: #f0f0f0;
+        --bg: #fff;
+        --bg-panel: #fafafa;
+        --bg-head: #f5f5f5;
+        --fg: #111;
+        --muted: #666;
+        --ok: #008800;
+        --gap: 0.5rem;
+        --radius: 2px;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: var(--font-sans);
+        font-size: 12px;
+        color: var(--fg);
+        background: var(--bg);
+        padding: var(--gap);
+        line-height: 1.4;
+      }
+
+      .mono {
+        font-family: var(--font-mono);
+      }
+
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid var(--border);
+        padding-bottom: 0.25rem;
+        margin-bottom: var(--gap);
+
+        h1 {
+          font-size: 13px;
+          font-weight: 600;
+        }
+
+        .status-indicators {
+          display: flex;
+          gap: 0.5rem;
+          font-family: var(--font-mono);
+          font-weight: 600;
+          font-size: 11px;
+        }
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 340px minmax(0, 1fr);
+        gap: var(--gap);
+        align-items: start;
+
+        @media (max-width: 860px) {
+          grid-template-columns: 1fr;
+
+          > .viewport-column {
+            order: -1;
+          }
+        }
+      }
+
+      .sidebar,
+      .viewport-column {
+        display: flex;
+        flex-direction: column;
+        gap: var(--gap);
+      }
+
+      fieldset {
+        border: 1px solid var(--border);
+        padding: 0.35rem 0.45rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.3rem;
+
+        legend {
+          font-size: 10px;
+          font-weight: 600;
+          padding: 0 0.2rem;
+          color: var(--muted);
+          text-transform: uppercase;
+        }
+      }
+
+      .row {
+        display: flex;
+        gap: 0.3rem;
+        align-items: center;
+
+        > * {
+          flex: 1;
+        }
+
+        > .fixed {
+          flex: 0 0 auto;
+        }
+      }
+
+      label {
+        font-size: 11px;
+        display: flex;
+        justify-content: space-between;
+      }
+
+      input[type="text"],
+      select,
+      button {
+        font-family: inherit;
+        font-size: 11px;
+        padding: 2px 4px;
+        border: 1px solid var(--border);
+        background: var(--bg);
+        border-radius: var(--radius);
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .metrics-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 2px;
+        font-family: var(--font-mono);
+        text-align: center;
+
+        &.cols-1 {
+          grid-template-columns: 1fr;
+          margin-top: 2px;
+        }
+
+        &.cols-4 {
+          grid-template-columns: repeat(4, 1fr);
+        }
+
+        .metric-box {
+          border: 1px solid var(--border);
+          padding: 2px;
+        }
+
+        .metric-label {
+          font-size: 9px;
+          color: var(--muted);
+          display: block;
+        }
+
+        .metric-val {
+          font-size: 11px;
+          font-weight: 600;
+        }
+      }
+
+      #logPanel {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        height: 60px;
+        border: 1px solid var(--border);
+        padding: 3px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        background: var(--bg-panel);
+      }
+
+      .detections-table-container {
+        max-height: 140px;
+        overflow-y: auto;
+        border: 1px solid var(--border);
+
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          font-family: var(--font-mono);
+          font-size: 10px;
+
+          th {
+            background: var(--bg-head);
+            text-align: left;
+            padding: 2px 4px;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+          }
+
+          th.num,
+          td.num {
+            text-align: right;
+          }
+
+          td.coords {
+            text-align: right;
+            color: var(--muted);
+          }
+
+          tr:not(:last-child) {
+            border-bottom: 1px solid var(--border-soft);
+          }
+
+          td {
+            padding: 2px 4px;
+          }
+        }
+      }
+
+      .viewport-container {
+        border: 1px solid var(--border);
+        background: #000;
+        width: 100%;
+        max-width: 640px;
+        aspect-ratio: 1 / 1;
+        position: relative;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        overflow: hidden;
+
+        video {
+          display: none;
+        }
+
+        canvas {
+          display: block;
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Unified Tracking Console</h1>
+      <div class="status-indicators">
+        <span id="filterStatus" style="color: var(--ok)">[1€ FILTER: ON]</span>
+        <span id="mpStatus">[MP: INIT]</span>
+        <span id="yoloStatus">[YOLO: DISCONNECTED]</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <div class="sidebar">
+        <fieldset>
+          <legend>Camera (Shared Source)</legend>
+          <div class="row">
+            <select id="cameraSelect">
+              <option value="">-- Scan Devices --</option>
+            </select>
+            <button id="refreshCamerasBtn" class="fixed">Scan</button>
+          </div>
+          <div class="row">
+            <button id="startCamBtn" disabled>Start</button>
+            <button id="stopCamBtn" disabled>Stop</button>
+          </div>
+          <div class="metrics-grid cols-1">
+            <div class="metric-box">
+              <span class="metric-label">CAMERA FPS</span>
+              <span class="metric-val" id="camFps">0.0</span>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>1€ Filter (Jitter Reduction)</legend>
+          <label for="filterEnabled">
+            <span>Enable 1€ Filter</span>
+            <input type="checkbox" id="filterEnabled" checked />
+          </label>
+          <label for="filterMinCutoff">
+            <span>Min Cutoff (fc_min)</span>
+            <span id="filterMinCutoffVal" class="mono">4.0 Hz</span>
+          </label>
+          <input type="range" id="filterMinCutoff" min="0.1" max="10.0" step="0.1" value="4.0" />
+
+          <label for="filterBeta">
+            <span>Speed Coeff (Beta)</span>
+            <span id="filterBetaVal" class="mono">0.007</span>
+          </label>
+          <input type="range" id="filterBeta" min="0.001" max="0.1" step="0.001" value="0.007" />
+        </fieldset>
+
+        <fieldset>
+          <legend>MediaPipe (Index Finger)</legend>
+          <div class="row">
+            <button id="reloadMpBtn">Reload Model</button>
+          </div>
+          <label for="mpConfThres">
+            <span>Confidence Threshold</span>
+            <span id="mpConfValue" class="mono">0.50</span>
+          </label>
+          <input type="range" id="mpConfThres" min="0.05" max="0.95" step="0.05" value="0.50" />
+
+          <div class="metrics-grid">
+            <div class="metric-box"><span class="metric-label">FPS</span><span class="metric-val" id="mpFps">0.0</span></div>
+            <div class="metric-box"><span class="metric-label">INFER</span><span class="metric-val" id="mpInfer">0ms</span></div>
+            <div class="metric-box"><span class="metric-label">SKIPPED</span><span class="metric-val" id="mpSkip">0</span></div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>YOLO26 (Pucks via WebSocket)</legend>
+          <input type="text" id="wsUrl" placeholder="ws://localhost:18888/ws" />
+          <div class="row">
+            <button id="connectYoloBtn">Connect</button>
+            <button id="disconnectYoloBtn" disabled>Disconnect</button>
+          </div>
+          <label for="yoloConfThres">
+            <span>Confidence Threshold</span>
+            <span id="yoloConfValue" class="mono">0.25</span>
+          </label>
+          <input type="range" id="yoloConfThres" min="0.05" max="0.95" step="0.05" value="0.25" />
+
+          <div class="metrics-grid cols-4">
+            <div class="metric-box"><span class="metric-label">FPS</span><span class="metric-val" id="yoloFps">0.0</span></div>
+            <div class="metric-box"><span class="metric-label">INFER</span><span class="metric-val" id="yoloInfer">0ms</span></div>
+            <div class="metric-box"><span class="metric-label">RTT</span><span class="metric-val" id="yoloRtt">0ms</span></div>
+            <div class="metric-box"><span class="metric-label">SKIPPED</span><span class="metric-val" id="yoloSkip">0</span></div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Active Detections</legend>
+          <div class="detections-table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Model / Item</th>
+                  <th class="num">Score</th>
+                  <th class="num">Coordinates</th>
+                </tr>
+              </thead>
+              <tbody id="detectionsList">
+                <tr>
+                  <td colspan="3" style="color: var(--muted)">No active detections</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Logs</legend>
+          <div id="logPanel">Ready.</div>
+        </fieldset>
+      </div>
+
+      <div class="viewport-column">
+        <div class="viewport-container">
+          <video id="webcam" playsinline muted></video>
+          <canvas id="outputCanvas" width="640" height="640"></canvas>
+        </div>
+      </div>
+    </main>
+
+    <script type="module">
+      import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest";
+
+      // ---------- Constants ----------
+      const TARGET_SIZE = 640;
+      const JPEG_QUALITY = 0.75;
+      const DEFAULT_PORT = "18888";
+      const INDEX_FINGER_TIP = 8;
+      const MAX_IN_FLIGHT = 2;
+      const MAX_BUFFERED_BYTES = 256 * 1024;
+
+      const HAND_COLORS = { Left: "#0066ff", Right: "#ff007f" };
+      const YOLO_CLASSES = { 0: "blue puck", 1: "pink puck" };
+      const YOLO_COLORS = { 0: "#0066ff", 1: "#ff007f" };
+
+      // ---------- 1€ Filter (Casiez et al.) ----------
+      class LowPassFilter {
+        s = null;
+
+        filter(value, alpha) {
+          this.s = this.s === null ? value : alpha * value + (1 - alpha) * this.s;
+          return this.s;
+        }
+
+        reset() {
+          this.s = null;
+        }
+      }
+
+      class OneEuroFilter {
+        constructor(minCutoff = 4.0, beta = 0.007, dCutoff = 1.0) {
+          this.setParameters(minCutoff, beta, dCutoff);
+          this.x = new LowPassFilter();
+          this.dx = new LowPassFilter();
+          this.lastTime = null;
+        }
+
+        setParameters(minCutoff, beta, dCutoff = 1.0) {
+          Object.assign(this, { minCutoff, beta, dCutoff });
+        }
+
+        alpha(rate, cutoff) {
+          const tau = 1 / (2 * Math.PI * cutoff);
+          return 1 / (1 + tau * rate);
+        }
+
+        filter(val, timestamp) {
+          if (this.lastTime === null) {
+            this.lastTime = timestamp;
+            return this.x.filter(val, 1);
+          }
+
+          const dt = (timestamp - this.lastTime) / 1000;
+          this.lastTime = timestamp;
+
+          // Tracking gap too big (>1s): reset smoother state to avoid long lag jumps
+          if (dt > 1) {
+            this.reset();
+            this.lastTime = timestamp;
+            return this.x.filter(val, 1);
+          }
+
+          if (dt <= 0) return this.x.s ?? val;
+
+          const rate = 1 / dt;
+          const prevX = this.x.s;
+          const dx = prevX === null ? 0 : (val - prevX) * rate;
+          const edx = this.dx.filter(dx, this.alpha(rate, this.dCutoff));
+          const cutoff = this.minCutoff + this.beta * Math.abs(edx);
+          return this.x.filter(val, this.alpha(rate, cutoff));
+        }
+
+        reset() {
+          this.x.reset();
+          this.dx.reset();
+          this.lastTime = null;
+        }
+      }
+
+      class MultiFilter {
+        constructor(count, minCutoff = 4.0, beta = 0.007) {
+          this.filters = Array.from({ length: count }, () => new OneEuroFilter(minCutoff, beta));
+        }
+
+        setParameters(minCutoff, beta) {
+          this.filters.forEach((f) => f.setParameters(minCutoff, beta));
+        }
+
+        filter(values, timestamp) {
+          return values.map((v, i) => this.filters[i].filter(v, timestamp));
+        }
+
+        reset() {
+          this.filters.forEach((f) => f.reset());
+        }
+      }
+
+      // ---------- DOM ----------
+      const el = Object.fromEntries(
+        [
+          "filterStatus",
+          "mpStatus",
+          "yoloStatus",
+          "cameraSelect",
+          "refreshCamerasBtn",
+          "startCamBtn",
+          "stopCamBtn",
+          "reloadMpBtn",
+          "wsUrl",
+          "connectYoloBtn",
+          "disconnectYoloBtn",
+          "filterEnabled",
+          "filterMinCutoff",
+          "filterMinCutoffVal",
+          "filterBeta",
+          "filterBetaVal",
+          "mpConfThres",
+          "mpConfValue",
+          "yoloConfThres",
+          "yoloConfValue",
+          "camFps",
+          "mpFps",
+          "mpInfer",
+          "mpSkip",
+          "yoloFps",
+          "yoloInfer",
+          "yoloRtt",
+          "yoloSkip",
+          "detectionsList",
+          "logPanel",
+        ].map((id) => [id, document.getElementById(id)]),
+      );
+      el.video = document.getElementById("webcam");
+      el.canvas = document.getElementById("outputCanvas");
+
+      const ctx = el.canvas.getContext("2d");
+      const offscreen = Object.assign(document.createElement("canvas"), { width: TARGET_SIZE, height: TARGET_SIZE });
+      const offscreenCtx = offscreen.getContext("2d", { willReadFrequently: false });
+
+      // ---------- State ----------
+      let mediaStream = null;
+      let isStreaming = false;
+
+      const fingerFilters = { Left: new MultiFilter(2), Right: new MultiFilter(2) };
+      const boxFilters = new Map();
+      const lastKnownPucks = new Map();
+
+      const fpsCounters = {};
+      const trackFps = (name, target) => {
+        const c = (fpsCounters[name] ??= { count: 0, windowStart: performance.now() });
+        c.count++;
+        const now = performance.now();
+        if (now - c.windowStart >= 1000) {
+          target.textContent = ((c.count * 1000) / (now - c.windowStart)).toFixed(1);
+          c.count = 0;
+          c.windowStart = now;
+        }
+      };
+
+      // MediaPipe pipeline state
+      let handLandmarker = null;
+      let isMpInferencing = false;
+      let mpSkippedFrames = 0;
+      let lastMpVideoTime = -1;
+      let latestMpDetections = [];
+
+      // YOLO pipeline state
+      let ws = null;
+      let yoloInFlight = 0;
+      let isYoloEncoding = false;
+      let yoloClientSkip = 0;
+      let latestYoloDetections = [];
+      let yoloTargetSize = TARGET_SIZE;
+
+      // ---------- Shared Video Loop ----------
+      function startCaptureLoop() {
+        const scheduleNext = () => isStreaming && (el.video.requestVideoFrameCallback?.(onFrame) ?? requestAnimationFrame(onFrame));
+
+        const onFrame = () => {
+          if (!isStreaming) return;
+          trackFps("cam", el.camFps);
+          stepMediaPipe();
+          stepYolo();
+          scheduleNext();
+        };
+
+        scheduleNext();
+      }
+
+      // ---------- MediaPipe Pipeline ----------
+      async function initMediaPipe() {
+        el.mpStatus.textContent = "[MP: LOADING]";
+        log("MediaPipe: Loading Hand Landmarker...");
+        try {
+          const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm");
+          const conf = parseFloat(el.mpConfThres.value);
+
+          handLandmarker = await HandLandmarker.createFromOptions(vision, {
+            baseOptions: {
+              modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+              delegate: "GPU",
+            },
+            runningMode: "VIDEO",
+            numHands: 2,
+            minHandDetectionConfidence: conf,
+            minHandPresenceConfidence: conf,
+            minTrackingConfidence: 0.5,
+          });
+
+          el.mpStatus.textContent = "[MP: READY]";
+          log("MediaPipe: Ready.");
+          checkStartReadiness();
+        } catch (err) {
+          el.mpStatus.textContent = "[MP: ERROR]";
+          log(`MediaPipe Init Error: ${err.message}`);
+        }
+      }
+
+      function stepMediaPipe() {
+        if (!isStreaming || !handLandmarker || el.video.readyState < 2) return;
+
+        if (isMpInferencing) {
+          el.mpSkip.textContent = ++mpSkippedFrames;
+          return;
+        }
+
+        if (el.video.currentTime === lastMpVideoTime) return;
+        lastMpVideoTime = el.video.currentTime;
+
+        isMpInferencing = true;
+        const start = performance.now();
+
+        try {
+          const results = handLandmarker.detectForVideo(el.video, performance.now());
+          handleMpResult(results, performance.now() - start);
+        } catch (e) {
+          log(`MediaPipe Infer Error: ${e.message}`);
+        } finally {
+          isMpInferencing = false;
+        }
+      }
+
+      function handleMpResult(results, inferDuration) {
+        trackFps("mp", el.mpFps);
+        el.mpInfer.textContent = `${inferDuration.toFixed(1)}ms`;
+
+        const confThres = parseFloat(el.mpConfThres.value);
+        const filterOn = el.filterEnabled.checked;
+        const now = performance.now();
+        const activeHands = new Set();
+        const detections = [];
+
+        (results.landmarks || []).forEach((landmarks, index) => {
+          const handedness = results.handednesses?.[index]?.[0];
+          const hand = handedness?.categoryName || (index === 0 ? "Left" : "Right");
+          const score = handedness?.score ?? 1.0;
+          const tip = landmarks[INDEX_FINGER_TIP];
+          if (score < confThres || !tip) return;
+
+          activeHands.add(hand);
+          const [normX, normY] = filterOn && fingerFilters[hand] ? fingerFilters[hand].filter([tip.x, tip.y], now) : [tip.x, tip.y];
+
+          detections.push({ type: "hand", label: `${hand} Index`, hand, score, normX, normY });
+        });
+
+        for (const hand of ["Left", "Right"]) {
+          if (!activeHands.has(hand)) fingerFilters[hand].reset();
+        }
+
+        latestMpDetections = detections;
+        renderOverlay();
+      }
+
+      // ---------- YOLO WebSocket Pipeline ----------
+      function connectWebSocket() {
+        const url = el.wsUrl.value.trim();
+        if (!url) return;
+
+        log(`YOLO: Connecting to ${url}...`);
+        el.yoloStatus.textContent = "[YOLO: CONNECTING]";
+        el.connectYoloBtn.disabled = true;
+
+        try {
+          ws = new WebSocket(url);
+          ws.binaryType = "arraybuffer";
+
+          ws.onopen = () => {
+            el.yoloStatus.textContent = "[YOLO: CONNECTED]";
+            log("YOLO: Connected.");
+            el.disconnectYoloBtn.disabled = false;
+            yoloInFlight = 0;
+          };
+
+          ws.onclose = ({ code }) => {
+            el.yoloStatus.textContent = "[YOLO: DISCONNECTED]";
+            log(`YOLO: Disconnected (${code})`);
+            el.connectYoloBtn.disabled = false;
+            el.disconnectYoloBtn.disabled = true;
+            ws = null;
+            yoloInFlight = 0;
+          };
+
+          ws.onerror = () => {
+            el.yoloStatus.textContent = "[YOLO: ERROR]";
+            log("YOLO: WebSocket error.");
+          };
+
+          ws.onmessage = ({ data }) => {
+            yoloInFlight = Math.max(0, yoloInFlight - 1);
+            try {
+              const parsed = JSON.parse(data);
+              const rtt = parsed.client_ts ? Math.round(performance.now() - parsed.client_ts) : 0;
+              handleYoloResult(parsed, rtt);
+            } catch (e) {
+              log(`YOLO Parse Error: ${e.message}`);
+            }
+          };
+        } catch (e) {
+          log(`YOLO Init Error: ${e.message}`);
+          el.yoloStatus.textContent = "[YOLO: ERROR]";
+          el.connectYoloBtn.disabled = false;
+        }
+      }
+
+      function stepYolo() {
+        if (!isStreaming || ws?.readyState !== WebSocket.OPEN || el.video.readyState < 2) return;
+
+        if (isYoloEncoding || yoloInFlight >= MAX_IN_FLIGHT || ws.bufferedAmount > MAX_BUFFERED_BYTES) {
+          el.yoloSkip.textContent = ++yoloClientSkip;
+          return;
+        }
+
+        isYoloEncoding = true;
+        offscreenCtx.drawImage(el.video, 0, 0, TARGET_SIZE, TARGET_SIZE);
+        offscreen.toBlob(
+          (blob) => {
+            isYoloEncoding = false;
+            if (!blob || ws?.readyState !== WebSocket.OPEN || !isStreaming) return;
+
+            const header = new ArrayBuffer(8);
+            new DataView(header).setFloat64(0, performance.now(), true);
+            yoloInFlight++;
+            ws.send(new Blob([header, blob]));
+          },
+          "image/jpeg",
+          JPEG_QUALITY,
+        );
+      }
+
+      function handleYoloResult(data, rtt) {
+        trackFps("yolo", el.yoloFps);
+        el.yoloInfer.textContent = `${(data.infer_ms || 0).toFixed(1)}ms`;
+        el.yoloRtt.textContent = `${rtt}ms`;
+        el.yoloSkip.textContent = yoloClientSkip + (data.dropped_total || 0);
+
+        yoloTargetSize = data.target_size || TARGET_SIZE;
+        const confThres = parseFloat(el.yoloConfThres.value);
+        const filterOn = el.filterEnabled.checked;
+        const now = performance.now();
+        const seenClassIds = new Set();
+
+        const detections = (data.detections || [])
+          .filter((d) => d.score >= confThres)
+          .map(({ box, score, class_id }) => {
+            let [x1, y1, x2, y2] = box;
+            if (x2 < x1 || y2 < y1) [x1, y1, x2, y2] = cxcywhToXyxy(x1, y1, x2, y2);
+
+            seenClassIds.add(class_id);
+            if (filterOn) [x1, y1, x2, y2] = getBoxFilter(class_id).filter([x1, y1, x2, y2], now);
+
+            const label = YOLO_CLASSES[class_id] || `id:${class_id}`;
+            lastKnownPucks.set(class_id, { box: [x1, y1, x2, y2], score, label });
+
+            return { type: "puck", class_id, label, score, box: [x1, y1, x2, y2], persisted: false };
+          });
+
+        // Fill in missing pucks with their last known position
+        lastKnownPucks.forEach(({ box, score, label }, class_id) => {
+          if (!seenClassIds.has(class_id)) {
+            detections.push({ type: "puck", class_id, label, score, box: [...box], persisted: true });
+          }
+        });
+
+        latestYoloDetections = detections;
+        renderOverlay();
+      }
+
+      // ---------- Rendering ----------
+      function renderOverlay() {
+        if (!isStreaming || el.video.readyState < 2) return;
+
+        const targetW = el.video.videoWidth || TARGET_SIZE;
+        const targetH = el.video.videoHeight || TARGET_SIZE;
+        if (el.canvas.width !== targetW) el.canvas.width = targetW;
+        if (el.canvas.height !== targetH) el.canvas.height = targetH;
+
+        ctx.drawImage(el.video, 0, 0, el.canvas.width, el.canvas.height);
+        ctx.font = "11px monospace";
+        ctx.textAlign = "left";
+
+        const scaleX = el.canvas.width / yoloTargetSize;
+        const scaleY = el.canvas.height / yoloTargetSize;
+
+        latestYoloDetections.forEach(({ box: [x1, y1, x2, y2], score, class_id, persisted }) => {
+          const [bx, by, bw, bh] = [x1 * scaleX, y1 * scaleY, (x2 - x1) * scaleX, (y2 - y1) * scaleY];
+          const color = YOLO_COLORS[class_id] || "#00ff00";
+
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash(persisted ? [4, 3] : []);
+          ctx.strokeRect(bx, by, bw, bh);
+          ctx.setLineDash([]);
+
+          ctx.fillStyle = color;
+          const tag = `${(score * 100).toFixed(0)}%${persisted ? " (last known)" : ""}`;
+          ctx.fillText(tag, bx + 1, by > 12 ? by - 3 : by + 12);
+        });
+
+        latestMpDetections.forEach(({ normX, normY, hand, score }) => {
+          const x = normX * el.canvas.width;
+          const y = normY * el.canvas.height;
+          const color = HAND_COLORS[hand] || "#00ff00";
+
+          ctx.beginPath();
+          ctx.arc(x, y, 6, 0, 2 * Math.PI);
+          ctx.fillStyle = color;
+          ctx.fill();
+          ctx.fillText(`${hand} ${(score * 100).toFixed(0)}%`, x + 8, y > 12 ? y - 3 : y + 12);
+        });
+
+        updateDetectionsTable();
+      }
+
+      function updateDetectionsTable() {
+        const row = (color, label, score, coords) => `
+          <tr>
+            <td style="color: ${color || "inherit"}">${label}</td>
+            <td class="num">${(score * 100).toFixed(1)}%</td>
+            <td class="coords">[${coords}]</td>
+          </tr>
+        `;
+
+        const rows = [
+          ...latestMpDetections.map((d) =>
+            row(HAND_COLORS[d.hand], d.label, d.score, `${Math.round(d.normX * el.canvas.width)}, ${Math.round(d.normY * el.canvas.height)}`),
+          ),
+          ...latestYoloDetections.map((d) =>
+            row(
+              YOLO_COLORS[d.class_id],
+              d.persisted ? `${d.label} <span style="font-size: 8px; opacity: 0.7">(last known)</span>` : d.label,
+              d.score,
+              d.box.map(Math.round).join(", "),
+            ),
+          ),
+        ];
+
+        el.detectionsList.innerHTML = rows.join("") || '<tr><td colspan="3" style="color: var(--muted)">0 active detections</td></tr>';
+      }
+
+      function drawNoSignal() {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, el.canvas.width, el.canvas.height);
+        ctx.fillStyle = "#666";
+        ctx.font = "11px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("NO SIGNAL", el.canvas.width / 2, el.canvas.height / 2);
+      }
+
+      // ---------- Camera ----------
+      async function scanCameras() {
+        try {
+          if (!mediaStream && el.cameraSelect.options.length <= 1) {
+            try {
+              const temp = await navigator.mediaDevices.getUserMedia({ video: true });
+              temp.getTracks().forEach((t) => t.stop());
+            } catch {}
+          }
+
+          const devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "videoinput");
+
+          if (!devices.length) {
+            el.cameraSelect.innerHTML = '<option value="">No cameras found</option>';
+            el.startCamBtn.disabled = true;
+            return;
+          }
+
+          el.cameraSelect.innerHTML = devices.map((d, i) => `<option value="${d.deviceId}">${d.label || `Camera ${i + 1}`}</option>`).join("");
+          checkStartReadiness();
+          log(`Found ${devices.length} camera(s).`);
+        } catch (err) {
+          log(`Camera scan error: ${err.message}`);
+        }
+      }
+
+      async function startCamera() {
+        const deviceId = el.cameraSelect.value;
+
+        try {
+          if (mediaStream) stopCamera();
+          mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              ...(deviceId && { deviceId: { exact: deviceId } }),
+              width: { ideal: TARGET_SIZE },
+              height: { ideal: TARGET_SIZE },
+              frameRate: { ideal: 60 },
+            },
+          });
+          el.video.srcObject = mediaStream;
+          await el.video.play();
+
+          isStreaming = true;
+          setCameraControls(true);
+          log("Camera stream started.");
+          startCaptureLoop();
+        } catch (err) {
+          log(`Camera start failed: ${err.message}`);
+        }
+      }
+
+      function stopCamera() {
+        isStreaming = false;
+        mediaStream?.getTracks().forEach((t) => t.stop());
+        mediaStream = null;
+        el.video.srcObject = null;
+        latestMpDetections = [];
+        latestYoloDetections = [];
+        lastKnownPucks.clear();
+        resetAllFilters();
+
+        setCameraControls(false);
+        log("Camera stream stopped.");
+        drawNoSignal();
+        updateDetectionsTable();
+      }
+
+      // ---------- Helpers ----------
+      const cxcywhToXyxy = (cx, cy, w, h) => [cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2];
+
+      const filterParams = () => [parseFloat(el.filterMinCutoff.value), parseFloat(el.filterBeta.value)];
+
+      const allFilters = () => [fingerFilters.Left, fingerFilters.Right, ...boxFilters.values()];
+
+      const resetAllFilters = () => allFilters().forEach((f) => f.reset());
+
+      const updateAllFilterParams = () => allFilters().forEach((f) => f.setParameters(...filterParams()));
+
+      function getBoxFilter(classId) {
+        if (!boxFilters.has(classId)) boxFilters.set(classId, new MultiFilter(4, ...filterParams()));
+        return boxFilters.get(classId);
+      }
+
+      const checkStartReadiness = () => {
+        if (el.cameraSelect.value || el.cameraSelect.options.length > 0) el.startCamBtn.disabled = false;
+      };
+
+      const setCameraControls = (running) => {
+        el.startCamBtn.disabled = running;
+        el.stopCamBtn.disabled = !running;
+        el.cameraSelect.disabled = running;
+      };
+
+      const log = (msg) => {
+        const time = new Date().toTimeString().split(" ")[0];
+        el.logPanel.textContent += `[${time}] ${msg}\n`;
+        el.logPanel.scrollTop = el.logPanel.scrollHeight;
+      };
+
+      const buildDefaultWsUrl = () => {
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const host = location.hostname || "localhost";
+        return location.protocol.startsWith("http") && location.port === DEFAULT_PORT
+          ? `${proto}//${location.host}/ws`
+          : `${proto}//${host}:${DEFAULT_PORT}/ws`;
+      };
+
+      // ---------- Event Listeners ----------
+      el.wsUrl.value = buildDefaultWsUrl();
+      drawNoSignal();
+
+      el.filterEnabled.addEventListener("change", ({ target: { checked } }) => {
+        el.filterStatus.textContent = checked ? "[1€ FILTER: ON]" : "[1€ FILTER: OFF]";
+        el.filterStatus.style.color = checked ? "var(--ok)" : "var(--muted)";
+        if (!checked) resetAllFilters();
+      });
+
+      el.filterMinCutoff.addEventListener("input", ({ target }) => {
+        el.filterMinCutoffVal.textContent = `${parseFloat(target.value).toFixed(1)} Hz`;
+        updateAllFilterParams();
+      });
+
+      el.filterBeta.addEventListener("input", ({ target }) => {
+        el.filterBetaVal.textContent = parseFloat(target.value).toFixed(3);
+        updateAllFilterParams();
+      });
+
+      el.mpConfThres.addEventListener("input", async ({ target }) => {
+        el.mpConfValue.textContent = target.value;
+        const conf = parseFloat(target.value);
+        await handLandmarker?.setOptions({ minHandDetectionConfidence: conf, minHandPresenceConfidence: conf });
+      });
+
+      el.yoloConfThres.addEventListener("input", ({ target }) => (el.yoloConfValue.textContent = target.value));
+
+      el.reloadMpBtn.addEventListener("click", initMediaPipe);
+      el.connectYoloBtn.addEventListener("click", connectWebSocket);
+      el.disconnectYoloBtn.addEventListener("click", () => ws?.close());
+      el.refreshCamerasBtn.addEventListener("click", scanCameras);
+      el.startCamBtn.addEventListener("click", startCamera);
+      el.stopCamBtn.addEventListener("click", stopCamera);
+
+      // Startup
+      await initMediaPipe();
+      await scanCameras();
+    </script>
+  </body>
+</html>
